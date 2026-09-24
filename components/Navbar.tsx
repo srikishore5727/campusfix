@@ -43,7 +43,13 @@ export default function Navbar() {
           )}
         </Link>
 
-        {user && (
+        {user && user.role === "super_admin" && (
+          <nav className="hidden items-center gap-1 md:flex">
+            {link("/team", "Verification")}
+          </nav>
+        )}
+
+        {user && user.role !== "super_admin" && (
           <nav className="hidden items-center gap-1 md:flex">
             {user.role === "student" ? (
               <>
@@ -82,7 +88,7 @@ export default function Navbar() {
               <span className="hidden max-w-[180px] truncate text-right text-xs leading-tight text-zinc-600 lg:block">
                 <span className="block truncate font-semibold text-zinc-900">{user.name}</span>
                 <span className="capitalize">
-                  {user.role === "campus_admin" ? "Campus admin" : user.role}
+                  {user.role === "campus_admin" ? "Campus admin" : user.role === "super_admin" ? "Team" : user.role}
                 </span>
               </span>
               <button
@@ -98,7 +104,12 @@ export default function Navbar() {
           )}
         </div>
       </div>
-      {user && (
+      {user && user.role === "super_admin" && (
+        <div className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-3 pb-2 md:hidden">
+          {link("/team", "Verification")}
+        </div>
+      )}
+      {user && user.role !== "super_admin" && (
         <div className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-3 pb-2 md:hidden">
           {user.role === "student" ? (
             <>

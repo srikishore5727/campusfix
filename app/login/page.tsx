@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { fetchCampusById } from "@/lib/store";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -16,7 +17,19 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (user) router.push(user.role === "student" ? "/" : "/admin");
+    if (!user) return;
+    if (user.role === "super_admin") {
+      router.push("/team");
+      return;
+    }
+    if (user.role === "student" || user.role === "warden") {
+      router.push("/");
+      return;
+    }
+    // campus_admin: approved -> dashboard, else status page
+    fetchCampusById(user.campus_id).then((c) => {
+      router.push(c && c.status === "approved" ? "/admin" : "/pending");
+    });
   }, [user, router]);
 
   const inputCls =
@@ -39,7 +52,7 @@ export default function LoginPage() {
     const e = await registerCampus({ campus_name: campusName, admin_name: name, admin_email: email });
     setBusy(false);
     if (e) setErr(e);
-    else setOk("Campus created — opening your admin dashboard…");
+    else setOk("Submitted for verification — you'll get the approval email shortly. Taking you to status…");
   }
 
   return (
@@ -51,7 +64,7 @@ export default function LoginPage() {
         <p className="mt-1 text-sm text-zinc-500">
           {mode === "login"
             ? "Enter the exact name + email your campus admin registered. You'll land in your campus automatically."
-            : "For college in-charge only. Creates an isolated campus and makes you its admin."}
+            : "For college in-charge only. Your campus goes to our team for verification — approval or decline arrives by email automatically. Each campus name can be registered only once."}
         </p>
 
         <div className="mt-4 grid grid-cols-2 gap-1.5 rounded-2xl bg-zinc-100 p-1.5 text-sm font-semibold">
@@ -110,7 +123,7 @@ export default function LoginPage() {
           <p className="rounded-xl bg-zinc-50 border p-3 text-xs leading-relaxed text-zinc-600">
             {mode === "login"
               ? "Not registered yet? Ask your campus admin to add your Name + Email (they can bulk-upload a CSV). Emails are unique — one email works in one campus only."
-              : "After setup, add wardens + students from Admin → Members (single add or CSV bulk upload: Name, Email, Role)."}
+              : "One registration per campus (duplicates like IIT Madras / iit-madras are blocked). After approval, add wardens + students from Admin → Members."}
           </p>
         </div>
       </div>

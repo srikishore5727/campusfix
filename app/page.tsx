@@ -6,11 +6,12 @@ import ComplaintCard, { SkeletonCard } from "@/components/ComplaintCard";
 import { useAuth } from "@/lib/auth";
 import {
   ensureSeed,
+  fetchCampusById,
   fetchComplaints,
   subscribeCampusUpdates,
   toggleUpvote,
 } from "@/lib/store";
-import { CATEGORIES, type Complaint, type Status } from "@/lib/types";
+import { CATEGORIES, type Campus, type Complaint, type Status } from "@/lib/types";
 
 type Filter = "all" | Status;
 
@@ -23,6 +24,7 @@ export default function Home() {
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<"top" | "new">("top");
   const [lastSync, setLastSync] = useState<Date | null>(null);
+  const [campus, setCampus] = useState<Campus | null>(null);
 
   const campusId = user?.campus_id || "";
 
@@ -32,8 +34,12 @@ export default function Home() {
       return;
     }
     ensureSeed();
-    const data = await fetchComplaints(campusId);
+    const [data, c] = await Promise.all([
+      fetchComplaints(campusId),
+      fetchCampusById(campusId),
+    ]);
     setItems(data);
+    setCampus(c);
     setLoading(false);
     setLastSync(new Date());
   }, [campusId]);
@@ -144,6 +150,31 @@ export default function Home() {
               <p className="mt-1 text-sm text-zinc-500">{d}</p>
             </div>
           ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Approval gate: pending/rejected campuses see status, not the feed.
+  if (!loading && user && campus && campus.status !== "approved") {
+    return (
+      <div className="mx-auto w-full max-w-lg">
+        <div className="rounded-3xl border bg-white p-6 text-center sm:p-8">
+          <p className="text-4xl">{campus.status === "rejected" ? "⚠️" : "⏳"}</p>
+          <h1 className="mt-2 text-xl font-bold">
+            {campus.status === "rejected" ? "Registration declined" : "Verification in progress"}
+          </h1>
+          <p className="mt-1 text-sm text-zinc-500">
+            {campus.status === "rejected"
+              ? `${campus.reject_reason || "The team could not verify this registration."} Email sent to ${campus.contact_email}.`
+              : `${campus.name} is under review by the CampusFix team. Approval or decline arrives by email at ${campus.contact_email} automatically.`}
+          </p>
+          <Link
+            href="/pending"
+            className="mt-5 inline-flex min-h-[48px] items-center rounded-2xl bg-zinc-900 px-6 py-3 text-sm font-bold text-white"
+          >
+            Check status
+          </Link>
         </div>
       </div>
     );

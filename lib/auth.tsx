@@ -2,8 +2,8 @@
 
 import React, { createContext, useContext, useEffect, useState } from "react";
 import type { AppUser } from "./types";
-import { normalizeEmail, normalizeName } from "./types";
-import { createCampus, findMemberByEmail } from "./store";
+import { isTeamEmail, normalizeEmail, normalizeName } from "./types";
+import { createCampus, fetchCampusById, findMemberByEmail } from "./store";
 import { getSupabaseBrowser } from "./supabaseClient";
 
 const SESSION_KEY = "campusfix_session_v3";
@@ -31,7 +31,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(SESSION_KEY);
       if (raw) {
         const u = JSON.parse(raw) as AppUser;
-        if (u && u.campus_id && u.email && u.name && u.role) setUser(u);
+        const teamOk = u.role === "super_admin" && isTeamEmail(u.email);
+        const memberOk = u.role !== "super_admin" && u.campus_id && u.email && u.name && u.role;
+        if (teamOk || memberOk) setUser(u);
         else localStorage.removeItem(SESSION_KEY);
       }
     } catch {}
@@ -46,17 +48,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }
 
-  // Roster login: email globally unique -> auto-resolves campus.
-  // Name must match roster (normalized exact).
+  // Unified login:
+  // 1) team emails -> super_admin (no campus), straight to /team
+  // 2) roster members -> campus auto-resolved; pending campuses login OK
+  //    but feed/dashboard show "under review" until approved.
   async function login(name: string, email: string): Promise<string | null> {
     const cleanName = name.trim().replace(/\s+/g, " ");
     const cleanEmail = normalizeEmail(email);
-    if (cleanName.length < 2) return "Enter your full name as given to your campus admin.";
+    if (cleanName.length < 2) return "Enter your full name.";
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) return "Enter a valid email.";
+
+    if (isTeamEmail(cleanEmail)) {
+      persist({
+        id: `team_${cleanEmail}`,
+        name: cleanName,
+        email: cleanEmail,
+        role: "super_admin",
+        campus_id: "",
+        campus_name: "CampusFix team",
+      });
+      return null;
+    }
+
     const hit = await findMemberByEmail(cleanEmail);
     if (!hit) return "This email is not registered. Ask your campus admin to add you (Name + Email).";
     if (normalizeName(hit.name) !== normalizeName(cleanName))
       return `Name doesn't match our records for this email. Registered as "${hit.name}" — enter it exactly.`;
+
+    const camp = await fetchCampusById(hit.campus_id);
+    if (camp && camp.status === "rejected")
+      return `This campus registration was declined${camp.reject_reason ? `: ${camp.reject_reason}` : "."} Contact the CampusFix team for help.`;
+
     persist({
       id: hit.id,
       name: hit.name,
@@ -68,6 +90,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return null;
   }
 
+  // New campus -> PENDING verification. Session is kept so the applicant
+  // sees the "under review" status page; admin access unlocks on approval.
   async function registerCampus(a: { campus_name: string; admin_name: string; admin_email: string }): Promise<string | null> {
     const campusName = a.campus_name.trim().replace(/\s+/g, " ");
     const adminName = a.admin_name.trim().replace(/\s+/g, " ");
@@ -75,10 +99,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (campusName.length < 3) return "Enter your college / campus name.";
     if (adminName.length < 2) return "Enter the in-charge full name.";
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) return "Enter a valid admin email.";
+    if (isTeamEmail(adminEmail)) return "This email belongs to the CampusFix team. Use your college email.";
     const dupe = await findMemberByEmail(adminEmail);
     if (dupe) return "This email is already registered in another campus. Use a different email (emails are unique).";
-    const camp = await createCampus(campusName);
-    // add admin to roster (Supabase createCampus already made campus row; members insert next)
+    let camp;
+    try {
+      camp = await createCampus(campusName, undefined, { name: adminName, email: adminEmail });
+    } catch (e: any) {
+      return e?.message || "Could not register campus. Try again.";
+    }
     const { addMember } = await import("./store");
     try {
       const m = await addMember(camp.id, adminName, adminEmail, "campus_admin");

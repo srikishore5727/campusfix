@@ -19,12 +19,18 @@ export function seedCampuses(): Campus[] {
       name: "Greenfield Institute of Technology",
       slug: "greenfield",
       created_at: now(60 * 24 * 30),
+      status: "approved",
+      contact_name: "Campus Admin",
+      contact_email: "admin@greenfield.edu",
     },
     {
       id: SEED_CAMPUS_B_ID,
       name: "Lakeview College of Arts",
       slug: "lakeview",
       created_at: now(60 * 24 * 20),
+      status: "approved",
+      contact_name: "Lake Admin",
+      contact_email: "admin@lakeview.edu",
     },
   ];
 }

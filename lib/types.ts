@@ -1,6 +1,8 @@
-export type Role = "student" | "warden" | "campus_admin";
+export type Role = "student" | "warden" | "campus_admin" | "super_admin";
 // Back-compat: old "admin" maps to "warden"
 export type LegacyRole = Role | "admin";
+
+export type CampusStatus = "pending" | "approved" | "rejected";
 
 export type Status = "open" | "in_progress" | "resolved";
 export type Category =
@@ -16,6 +18,26 @@ export interface Campus {
   name: string;
   slug: string;
   created_at: string;
+  status: CampusStatus;
+  contact_name: string;
+  contact_email: string;
+  reject_reason?: string | null;
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
+}
+
+export interface CampusNotification {
+  id: string;
+  campus_id: string;
+  campus_name: string;
+  to_email: string;
+  to_name: string;
+  kind: "approved" | "rejected";
+  subject: string;
+  body: string;
+  reason?: string | null;
+  created_at: string;
+  sent: boolean;
 }
 
 export interface AppUser {
@@ -47,6 +69,24 @@ export interface Member {
 
 export function normalizeName(n: string) {
   return n.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+export function normalizeCampus(n: string) {
+  return n.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+export function getTeamEmails(): string[] {
+  const raw =
+    process.env.NEXT_PUBLIC_TEAM_EMAILS ||
+    "team@campusfix.app";
+  return raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+export function isTeamEmail(email: string) {
+  return getTeamEmails().includes(email.trim().toLowerCase());
 }
 
 export function normalizeEmail(e: string) {
@@ -99,6 +139,7 @@ export const STATUS_LABEL: Record<Status, string> = {
 export function normalizeRole(r: string): Role {
   if (r === "admin" || r === "warden") return "warden";
   if (r === "campus_admin") return "campus_admin";
+  if (r === "super_admin") return "super_admin";
   return "student";
 }
 

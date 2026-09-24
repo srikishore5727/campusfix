@@ -7,13 +7,14 @@ import { useAuth } from "@/lib/auth";
 import {
   addMember,
   bulkAddMembers,
+  fetchCampusById,
   fetchComplaints,
   fetchMembers,
   removeMember,
   subscribeCampusUpdates,
   updateStatus,
 } from "@/lib/store";
-import type { Complaint, Member, Role, Status } from "@/lib/types";
+import type { Campus, Complaint, Member, Role, Status } from "@/lib/types";
 import { canManageComplaints } from "@/lib/types";
 
 export default function AdminPage() {
@@ -29,18 +30,21 @@ export default function AdminPage() {
   const [csv, setCsv] = useState("");
   const [csvResult, setCsvResult] = useState("");
   const [search, setSearch] = useState("");
+  const [campus, setCampus] = useState<Campus | null>(null);
 
   const load = useCallback(async () => {
     if (!user) {
       setLoading(false);
       return;
     }
-    const [c, m] = await Promise.all([
+    const [c, m, camp] = await Promise.all([
       fetchComplaints(user.campus_id),
       user.role === "campus_admin" ? fetchMembers(user.campus_id) : Promise.resolve([] as Member[]),
+      fetchCampusById(user.campus_id),
     ]);
     setItems(c);
     setMembers(m);
+    setCampus(camp);
     setLoading(false);
   }, [user?.campus_id, user?.role]);
 
@@ -143,6 +147,30 @@ export default function AdminPage() {
         <Link href="/" className="mt-3 inline-block font-bold underline">Go to my campus</Link>
       </div>
     );
+
+  if (!loading && user?.role === "campus_admin" && campus && campus.status !== "approved") {
+    return (
+      <div className="mx-auto w-full max-w-lg">
+        <div className="rounded-3xl border bg-white p-6 text-center sm:p-8">
+          <p className="text-4xl">{campus.status === "rejected" ? "⚠️" : "⏳"}</p>
+          <h1 className="mt-2 text-xl font-bold">
+            {campus.status === "rejected" ? "Registration declined" : "Verification in progress"}
+          </h1>
+          <p className="mt-1 text-sm text-zinc-500">
+            {campus.status === "rejected"
+              ? `${campus.reject_reason || "The team could not verify this registration."}`
+              : "Your campus is under review. Member management unlocks on approval — the decision email arrives automatically."}
+          </p>
+          <Link
+            href="/pending"
+            className="mt-5 inline-flex min-h-[48px] items-center rounded-2xl bg-zinc-900 px-6 py-3 text-sm font-bold text-white"
+          >
+            Check status
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

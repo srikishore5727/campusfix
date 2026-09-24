@@ -1,7 +1,7 @@
 import { getSupabaseBrowser } from "./supabaseClient";
 import { seedCampuses, seedComplaints } from "./seed";
-import type { Campus, Comment, Complaint, Member, Role, Status } from "./types";
-import { normalizeEmail, normalizeName } from "./types";
+import type { Campus, CampusNotification, Comment, Complaint, Member, Role, Status } from "./types";
+import { normalizeCampus, normalizeEmail, normalizeName } from "./types";
 
 // v2 keys (multi-tenant). Old v1 keys are migrated once.
 const CAMPUS_KEY = "campusfix_campuses_v2";
@@ -100,35 +100,93 @@ export function slugify(name: string) {
   );
 }
 
-// ---------------- CAMPUSES ----------------
+// ---------------- CAMPUSES (approval-gated) ----------------
 
+// Public use: ONLY approved campuses (never leaks pending/rejected names).
 export async function fetchCampuses(): Promise<Campus[]> {
+  const all = await fetchAllCampuses();
+  return all.filter((c) => (c.status || "approved") === "approved");
+}
+
+// Team use: every campus, newest first.
+export async function fetchAllCampuses(): Promise<Campus[]> {
   const client = sb();
   if (client) {
     try {
       const { data, error } = await client
         .from("campuses")
         .select("*")
-        .order("created_at", { ascending: true });
+        .order("created_at", { ascending: false });
       if (!error && data && data.length > 0) return data as Campus[];
     } catch {}
   }
   ensureSeed();
-  return readLocal<Campus[]>(CAMPUS_KEY, []);
+  return [...readLocal<Campus[]>(CAMPUS_KEY, [])].sort(
+    (a, b) => +new Date(b.created_at) - +new Date(a.created_at)
+  );
 }
 
+export async function fetchCampusById(id: string): Promise<Campus | null> {
+  if (!id) return null;
+  const client = sb();
+  if (client) {
+    try {
+      const { data } = await client.from("campuses").select("*").eq("id", id).single();
+      if (data) return data as Campus;
+    } catch {}
+  }
+  ensureSeed();
+  return readLocal<Campus[]>(CAMPUS_KEY, []).find((c) => c.id === id) || null;
+}
+
+function withApprovedSeed(list: Campus[]): Campus[] {
+  // migrate old seeds lacking status/contact
+  let changed = false;
+  const out = list.map((c) => {
+    if (!c.status) {
+      changed = true;
+      return { ...c, status: "approved" as const, contact_name: c.contact_name || "", contact_email: c.contact_email || "" };
+    }
+    return c;
+  });
+  if (changed && typeof window !== "undefined") writeLocal(CAMPUS_KEY, out);
+  return out;
+}
+
+// Registration request: PENDING + register-once guard.
+// "IIT Madras" == "iit-madras" == "IIT  Madras" -> blocked if pending/approved exists.
 export async function createCampus(
   name: string,
-  createdBy?: string
+  createdBy?: string,
+  contact?: { name: string; email: string }
 ): Promise<Campus> {
-  const clean = name.trim();
+  const clean = name.trim().replace(/\s+/g, " ");
   if (clean.length < 3) throw new Error("Campus name too short.");
+  const key = normalizeCampus(clean);
+  const existing = await fetchAllCampuses();
+  const dupe = existing.find(
+    (c) => normalizeCampus(c.name) === key && c.status !== "rejected"
+  );
+  if (dupe)
+    throw new Error(
+      `"${dupe.name}" is already registered (${dupe.status === "pending" ? "under verification" : "approved"}). One campus exists only once — ask its admin for access instead.`
+    );
+
+  const contactName = (contact?.name || "").trim();
+  const contactEmail = normalizeEmail(contact?.email || "");
   const client = sb();
   if (client) {
     try {
       const { data, error } = await client
         .from("campuses")
-        .insert({ name: clean, slug: `${slugify(clean)}-${Date.now().toString(36)}`, created_by: createdBy || null })
+        .insert({
+          name: clean,
+          slug: `${slugify(clean)}-${Date.now().toString(36)}`,
+          created_by: createdBy || null,
+          status: "pending",
+          contact_name: contactName || null,
+          contact_email: contactEmail || null,
+        })
         .select()
         .single();
       if (!error && data) {
@@ -142,12 +200,140 @@ export async function createCampus(
     name: clean,
     slug: `${slugify(clean)}-${Date.now().toString(36)}`,
     created_at: new Date().toISOString(),
+    status: "pending",
+    contact_name: contactName,
+    contact_email: contactEmail,
   };
-  const all = readLocal<Campus[]>(CAMPUS_KEY, []);
-  all.push(c);
+  const all = withApprovedSeed(readLocal<Campus[]>(CAMPUS_KEY, []));
+  all.unshift(c);
   writeLocal(CAMPUS_KEY, all);
   notifyLocal();
   return c;
+}
+
+// Team decision. Logs the decision email (sent via /api/notify).
+export async function reviewCampus(
+  campusId: string,
+  decision: "approved" | "rejected",
+  reason: string,
+  reviewer: string
+): Promise<CampusNotification> {
+  const cleanReason = reason.trim();
+  if (decision === "rejected" && cleanReason.length < 5)
+    throw new Error("Give a short reason — it goes in the decline email.");
+  const client = sb();
+  const nowIso = new Date().toISOString();
+
+  // load campus for mail details
+  const camp = await fetchCampusById(campusId);
+  if (!camp) throw new Error("Campus not found.");
+
+  if (client) {
+    try {
+      await client
+        .from("campuses")
+        .update({
+          status: decision,
+          reject_reason: decision === "rejected" ? cleanReason : null,
+          reviewed_at: nowIso,
+          reviewed_by: reviewer,
+        })
+        .eq("id", campusId);
+    } catch {}
+  }
+  const all = withApprovedSeed(readLocal<Campus[]>(CAMPUS_KEY, []));
+  writeLocal(
+    CAMPUS_KEY,
+    all.map((c) =>
+      c.id === campusId
+        ? { ...c, status: decision, reject_reason: decision === "rejected" ? cleanReason : null, reviewed_at: nowIso, reviewed_by: reviewer }
+        : c
+    )
+  );
+
+  const subject =
+    decision === "approved"
+      ? `Your campus "${camp.name}" is approved on CampusFix`
+      : `Update on your campus "${camp.name}" registration`;
+  const body =
+    decision === "approved"
+      ? `Hi ${camp.contact_name || "there"},\n\nGood news — "${camp.name}" has been verified and approved by the CampusFix team.\n\nYour admin login is now active. You can login with your registered Name + Email and start adding wardens and students (single add or CSV bulk upload).\n\n— CampusFix team`
+      : `Hi ${camp.contact_name || "there"},\n\nWe reviewed the registration for "${camp.name}" and could not approve it yet.\n\nReason: ${cleanReason}\n\nYou can fix this and register again, or reply to this email for help.\n\n— CampusFix team`;
+
+  const note: CampusNotification = {
+    id: uid("mail"),
+    campus_id: camp.id,
+    campus_name: camp.name,
+    to_email: camp.contact_email || "",
+    to_name: camp.contact_name || "",
+    kind: decision,
+    subject,
+    body,
+    reason: decision === "rejected" ? cleanReason : null,
+    created_at: nowIso,
+    sent: false,
+  };
+
+  if (client) {
+    try {
+      const { data } = await client
+        .from("notifications")
+        .insert({
+          campus_id: note.campus_id,
+          campus_name: note.campus_name,
+          to_email: note.to_email,
+          to_name: note.to_name,
+          kind: note.kind,
+          subject: note.subject,
+          body: note.body,
+          reason: note.reason,
+        })
+        .select()
+        .single();
+      if (data) {
+        note.id = (data as any).id || note.id;
+        note.sent = true;
+      }
+    } catch {}
+  }
+  const mails = readLocal<CampusNotification[]>(MAIL_KEY, []);
+  mails.unshift({ ...note, sent: note.sent });
+  writeLocal(MAIL_KEY, mails);
+
+  // fire-and-forget real email (Resend when configured, else simulated log)
+  try {
+    await fetch("/api/notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: note.to_email,
+        subject: note.subject,
+        body: note.body,
+        campusId: note.campus_id,
+        kind: note.kind,
+      }),
+    });
+  } catch {}
+
+  notifyLocal();
+  return note;
+}
+
+const MAIL_KEY = "campusfix_mail_v4";
+
+export async function fetchMailLog(): Promise<CampusNotification[]> {
+  const client = sb();
+  if (client) {
+    try {
+      const { data, error } = await client
+        .from("notifications")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (!error && data) return data as CampusNotification[];
+    } catch {}
+  }
+  return readLocal<CampusNotification[]>(MAIL_KEY, []);
 }
 
 // ---------------- WARDEN INVITES ----------------

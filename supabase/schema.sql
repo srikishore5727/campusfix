@@ -178,6 +178,44 @@ create policy "authed manage members" on public.members for insert with check (t
 drop policy if exists "authed delete members" on public.members;
 create policy "authed delete members" on public.members for delete using (true);
 
+-- 9b) CAMPUS APPROVAL WORKFLOW (v4) — run in the same SQL Editor
+-- New campuses start as 'pending'. App team approves/declines from /team.
+-- Only 'approved' campuses can be used. Name registered only once.
+alter table public.campuses add column if not exists status text not null default 'pending'
+  check (status in ('pending','approved','rejected'));
+alter table public.campuses add column if not exists contact_name text;
+alter table public.campuses add column if not exists contact_email text;
+alter table public.campuses add column if not exists reject_reason text;
+alter table public.campuses add column if not exists reviewed_at timestamptz;
+alter table public.campuses add column if not exists reviewed_by text;
+
+-- existing campuses (seeded before approval existed) become approved
+update public.campuses set status='approved' where status='pending' and reviewed_at is null
+  and id in (select campus_id from public.members where role='campus_admin');
+
+-- register-once guard: same normalized name can't exist twice (IIT Madras = iit-madras = IIT  Madras)
+create unique index if not exists campuses_name_unique
+  on public.campuses (lower(regexp_replace(name, '[^a-z0-9]', '', 'g')));
+
+-- outbound decision mails (audit log; real sending via /api/notify + RESEND_API_KEY)
+create table if not exists public.notifications (
+  id uuid primary key default gen_random_uuid(),
+  campus_id uuid references public.campuses(id) on delete cascade,
+  campus_name text not null default '',
+  to_email text not null,
+  to_name text not null default '',
+  kind text not null check (kind in ('approved','rejected')),
+  subject text not null,
+  body text not null,
+  reason text,
+  sent boolean not null default false,
+  created_at timestamptz default now()
+);
+alter table public.notifications enable row level security;
+drop policy if exists "notifications readable by all" on public.notifications;
+create policy "notifications readable by all" on public.notifications for select using (true);
+drop policy if exists "anyone can log notifications" on public.notifications;
+create policy "anyone can log notifications" on public.notifications for insert with check (true);
 -- 10) Realtime: enable publication so UI updates live (run once; ignore error if already added)
 -- alter publication supabase_realtime add table public.complaints;
 -- alter publication supabase_realtime add table public.comments;

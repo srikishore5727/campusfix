@@ -6,6 +6,11 @@
 
 **Live:** _(paste Vercel URL)_ `https://campusfix.vercel.app`
 
+**Campus registration (verified by the app team):**
+- New college registers → status **pending** (register-once: normalized name dedupe blocks `IIT Madras`/`iit-madras` duplicates while pending or approved)
+- Team opens `/team` (emails in `NEXT_PUBLIC_TEAM_EMAILS`) → Approve or Decline with reason → decision email goes automatically (`/api/notify` + Resend when `RESEND_API_KEY` set, else logged in Team → Decision emails)
+- Pending campuses see "verification in progress" gates; approved unlocks feed + member management; declined shows the reason
+
 **Login (private roster — no public signup, no campus list):**
 - Campus admin adds you (Name + Email, single or CSV bulk) → you login with exact Name + Email → auto-lands in your campus
 - New college? Register campus → you become its admin → add members from Admin → Members

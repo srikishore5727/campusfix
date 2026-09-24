@@ -1,9 +1,13 @@
 import { getSupabaseBrowser } from "./supabaseClient";
-import { seedComplaints } from "./seed";
-import type { Comment, Complaint, Status } from "./types";
+import { seedCampuses, seedComplaints } from "./seed";
+import type { Campus, Comment, Complaint, Status } from "./types";
 
-const C_KEY = "campusfix_complaints_v1";
-const M_KEY = "campusfix_comments_v1";
+// v2 keys (multi-tenant). Old v1 keys are migrated once.
+const CAMPUS_KEY = "campusfix_campuses_v2";
+const C_KEY = "campusfix_complaints_v2";
+const M_KEY = "campusfix_comments_v2";
+const OLD_C_KEY = "campusfix_complaints_v1";
+const UPDATE_EVENT = "campusfix:update";
 
 function uid(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random()
@@ -28,102 +32,246 @@ function writeLocal(key: string, val: unknown) {
   } catch {}
 }
 
+export function notifyLocal() {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new Event(UPDATE_EVENT));
+    // also bump a timestamp so polling/inactive tabs can detect
+    localStorage.setItem("campusfix_last_write", String(Date.now()));
+  } catch {}
+}
+
 export function ensureSeed() {
   if (typeof window === "undefined") return;
-  const existing = readLocal<Complaint[] | null>(C_KEY, null);
-  if (!existing) {
-    writeLocal(C_KEY, seedComplaints());
+  let campuses = readLocal<Campus[] | null>(CAMPUS_KEY, null);
+  if (!campuses) {
+    campuses = seedCampuses();
+    writeLocal(CAMPUS_KEY, campuses);
   }
-  const mc = readLocal<Comment[] | null>(M_KEY, null);
-  if (!mc) writeLocal(M_KEY, seedCommentsDefault());
+  let complaints = readLocal<Complaint[] | null>(C_KEY, null);
+  if (!complaints) {
+    // migrate old v1 data (single-tenant, no campus_id) into first campus
+    const old = readLocal<any[]>(OLD_C_KEY, []);
+    if (old.length > 0) {
+      complaints = old.map((c) => ({
+        ...c,
+        campus_id: c.campus_id || campuses![0].id,
+        upvoted_by: c.upvoted_by || [],
+      }));
+    } else {
+      complaints = seedComplaints();
+    }
+    // seed one comment thread on second complaint
+    const pick = complaints[1];
+    const seedComments: Comment[] = pick
+      ? [
+          {
+            id: uid("m"),
+            complaint_id: pick.id,
+            user_id: "seed_warden_1",
+            user_name: "Campus Warden",
+            role: "warden",
+            body: "ISP ticket raised. Temporary hotspot enabled in reading hall till fix.",
+            created_at: new Date(Date.now() - 60 * 60000).toISOString(),
+          },
+        ]
+      : [];
+    writeLocal(C_KEY, complaints);
+    const mc = readLocal<Comment[] | null>(M_KEY, null);
+    if (!mc) writeLocal(M_KEY, seedComments);
+  }
+  if (!readLocal<Comment[] | null>(M_KEY, null)) writeLocal(M_KEY, []);
 }
 
-function seedCommentsDefault(): Comment[] {
-  const complaints = readLocal<Complaint[]>(C_KEY, []);
-  const pick = complaints[1];
-  if (!pick)
-    return [
-      {
-        id: uid("m"),
-        complaint_id: "seed",
-        user_id: "demo_admin_1",
-        user_name: "Warden Admin",
-        role: "admin",
-        body: "Router will be replaced tomorrow morning. Temporary hotspot enabled in reading hall.",
-        created_at: new Date().toISOString(),
-      },
-    ];
-  return [
-    {
-      id: uid("m"),
-      complaint_id: pick.id,
-      user_id: "demo_admin_1",
-      user_name: "Warden Admin",
-      role: "admin",
-      body: "ISP ticket raised. Temporary hotspot enabled in reading hall till fix.",
-      created_at: new Date(Date.now() - 60 * 60000).toISOString(),
-    },
-    {
-      id: uid("m"),
-      complaint_id: pick.id,
-      user_id: pick.user_id,
-      user_name: pick.user_name,
-      role: "student",
-      body: "Thanks! Exam week so this helps a lot.",
-      created_at: new Date(Date.now() - 30 * 60000).toISOString(),
-    },
-  ];
-}
-
-function useSupabase() {
+function sb() {
   return getSupabaseBrowser();
 }
 
-// ---------- READ ----------
+export function slugify(name: string) {
+  return (
+    name
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "")
+      .slice(0, 40) || `campus-${Date.now().toString(36)}`
+  );
+}
 
-export async function fetchComplaints(): Promise<Complaint[]> {
-  const sb = useSupabase();
-  if (sb) {
+// ---------------- CAMPUSES ----------------
+
+export async function fetchCampuses(): Promise<Campus[]> {
+  const client = sb();
+  if (client) {
     try {
-      const { data, error } = await sb
+      const { data, error } = await client
+        .from("campuses")
+        .select("*")
+        .order("created_at", { ascending: true });
+      if (!error && data && data.length > 0) return data as Campus[];
+    } catch {}
+  }
+  ensureSeed();
+  return readLocal<Campus[]>(CAMPUS_KEY, []);
+}
+
+export async function createCampus(
+  name: string,
+  createdBy?: string
+): Promise<Campus> {
+  const clean = name.trim();
+  if (clean.length < 3) throw new Error("Campus name too short.");
+  const client = sb();
+  if (client) {
+    try {
+      const { data, error } = await client
+        .from("campuses")
+        .insert({ name: clean, slug: `${slugify(clean)}-${Date.now().toString(36)}`, created_by: createdBy || null })
+        .select()
+        .single();
+      if (!error && data) {
+        notifyLocal();
+        return data as Campus;
+      }
+    } catch {}
+  }
+  const c: Campus = {
+    id: uid("campus"),
+    name: clean,
+    slug: `${slugify(clean)}-${Date.now().toString(36)}`,
+    created_at: new Date().toISOString(),
+  };
+  const all = readLocal<Campus[]>(CAMPUS_KEY, []);
+  all.push(c);
+  writeLocal(CAMPUS_KEY, all);
+  notifyLocal();
+  return c;
+}
+
+// ---------------- WARDEN INVITES ----------------
+
+export interface WardenInviteRow {
+  id: string;
+  campus_id: string;
+  email: string;
+  added_by: string;
+  created_at: string;
+}
+
+const W_KEY = "campusfix_wardens_v2";
+
+export async function fetchWardenInvites(campusId: string): Promise<WardenInviteRow[]> {
+  const client = sb();
+  if (client) {
+    try {
+      const { data, error } = await client
+        .from("warden_invites")
+        .select("*")
+        .eq("campus_id", campusId)
+        .order("created_at", { ascending: false });
+      if (!error && data) return data as WardenInviteRow[];
+    } catch {}
+  }
+  return readLocal<WardenInviteRow[]>(W_KEY, []).filter((w) => w.campus_id === campusId);
+}
+
+export async function isWardenInvited(campusId: string, email: string): Promise<boolean> {
+  const list = await fetchWardenInvites(campusId);
+  return list.some((w) => w.email.toLowerCase() === email.toLowerCase());
+}
+
+export async function inviteWarden(
+  campusId: string,
+  email: string,
+  addedBy: string
+): Promise<WardenInviteRow> {
+  const clean = email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) throw new Error("Invalid email.");
+  const client = sb();
+  if (client) {
+    try {
+      const { data, error } = await client
+        .from("warden_invites")
+        .insert({ campus_id: campusId, email: clean, added_by: addedBy })
+        .select()
+        .single();
+      if (!error && data) {
+        notifyLocal();
+        return data as WardenInviteRow;
+      }
+    } catch {}
+  }
+  const all = readLocal<WardenInviteRow[]>(W_KEY, []);
+  if (all.some((w) => w.campus_id === campusId && w.email === clean))
+    throw new Error("This email is already added as warden.");
+  const row: WardenInviteRow = {
+    id: uid("w"),
+    campus_id: campusId,
+    email: clean,
+    added_by: addedBy,
+    created_at: new Date().toISOString(),
+  };
+  all.push(row);
+  writeLocal(W_KEY, all);
+  notifyLocal();
+  return row;
+}
+
+export async function removeWardenInvite(id: string): Promise<void> {
+  const client = sb();
+  if (client) {
+    try {
+      await client.from("warden_invites").delete().eq("id", id);
+    } catch {}
+  }
+  const all = readLocal<WardenInviteRow[]>(W_KEY, []);
+  writeLocal(
+    W_KEY,
+    all.filter((w) => w.id !== id)
+  );
+  notifyLocal();
+}
+
+// ---------------- COMPLAINTS (campus-scoped) ----------------
+
+export async function fetchComplaints(campusId: string): Promise<Complaint[]> {
+  if (!campusId) return [];
+  const client = sb();
+  if (client) {
+    try {
+      const { data, error } = await client
         .from("complaints")
         .select("*")
+        .eq("campus_id", campusId)
         .order("created_at", { ascending: false })
-        .limit(100);
-      if (!error && data && data.length > 0) {
-        return data as unknown as Complaint[];
+        .limit(200);
+      if (!error && data) {
+        // merge local upvoted_by? Supabase mode uses upvotes table; keep field for UI compat
+        return (data as any[]).map((d) => ({ ...d, upvoted_by: d.upvoted_by || [] })) as Complaint[];
       }
-      // fall through to local if empty (so demo still looks rich)
-    } catch {
-      // fall through
-    }
+    } catch {}
   }
   ensureSeed();
   const local = readLocal<Complaint[]>(C_KEY, []);
-  return [...local].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+  return local
+    .filter((c) => c.campus_id === campusId)
+    .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
 }
 
-export async function fetchComments(complaintId: string): Promise<Comment[]> {
-  const sb = useSupabase();
-  if (sb) {
+export async function fetchComplaintById(id: string): Promise<Complaint | null> {
+  const client = sb();
+  if (client) {
     try {
-      const { data, error } = await sb
-        .from("comments")
-        .select("*")
-        .eq("complaint_id", complaintId)
-        .order("created_at", { ascending: true });
-      if (!error && data) return data as unknown as Comment[];
+      const { data } = await client.from("complaints").select("*").eq("id", id).single();
+      if (data) return data as Complaint;
     } catch {}
   }
-  const all = readLocal<Comment[]>(M_KEY, []);
-  return all
-    .filter((c) => c.complaint_id === complaintId)
-    .sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at));
+  ensureSeed();
+  return readLocal<Complaint[]>(C_KEY, []).find((c) => c.id === id) || null;
 }
 
-// ---------- WRITE ----------
-
 export async function createComplaint(input: {
+  campus_id: string;
   user_id: string;
   user_name: string;
   title: string;
@@ -132,24 +280,18 @@ export async function createComplaint(input: {
   block: string;
   image_url: string | null;
 }): Promise<Complaint> {
-  const sb = useSupabase();
-  if (sb) {
+  const client = sb();
+  if (client) {
     try {
-      const { data, error } = await sb
+      const { data, error } = await client
         .from("complaints")
-        .insert({
-          user_id: input.user_id,
-          user_name: input.user_name,
-          title: input.title,
-          description: input.description,
-          category: input.category,
-          block: input.block,
-          status: "open",
-          image_url: input.image_url,
-        })
+        .insert({ ...input, status: "open" })
         .select()
         .single();
-      if (!error && data) return data as unknown as Complaint;
+      if (!error && data) {
+        notifyLocal();
+        return { ...(data as Complaint), upvoted_by: [] };
+      }
     } catch {}
   }
   const c: Complaint = {
@@ -163,43 +305,29 @@ export async function createComplaint(input: {
   const all = readLocal<Complaint[]>(C_KEY, []);
   all.unshift(c);
   writeLocal(C_KEY, all);
+  notifyLocal();
   return c;
 }
 
-export async function toggleUpvote(
-  complaint: Complaint,
-  userId: string
-): Promise<Complaint> {
-  const sb = useSupabase();
-  if (sb) {
+export async function toggleUpvote(complaint: Complaint, userId: string): Promise<Complaint> {
+  const client = sb();
+  if (client) {
     try {
-      // check existing upvote row
-      const { data: existing } = await sb
+      const { data: existing } = await client
         .from("upvotes")
         .select("*")
         .eq("complaint_id", complaint.id)
         .eq("user_id", userId)
         .maybeSingle();
       if (existing) {
-        await sb
-          .from("upvotes")
-          .delete()
-          .eq("complaint_id", complaint.id)
-          .eq("user_id", userId);
-        const { data } = await sb
-          .from("complaints")
-          .select("*")
-          .eq("id", complaint.id)
-          .single();
-        if (data) return data as unknown as Complaint;
+        await client.from("upvotes").delete().eq("complaint_id", complaint.id).eq("user_id", userId);
       } else {
-        await sb.from("upvotes").insert({ complaint_id: complaint.id, user_id: userId });
-        const { data } = await sb
-          .from("complaints")
-          .select("*")
-          .eq("id", complaint.id)
-          .single();
-        if (data) return data as unknown as Complaint;
+        await client.from("upvotes").insert({ complaint_id: complaint.id, user_id: userId });
+      }
+      const { data } = await client.from("complaints").select("*").eq("id", complaint.id).single();
+      if (data) {
+        notifyLocal();
+        return { ...(data as Complaint), upvoted_by: complaint.upvoted_by };
       }
     } catch {}
   }
@@ -208,56 +336,19 @@ export async function toggleUpvote(
   if (idx === -1) return complaint;
   const cur = all[idx];
   const has = cur.upvoted_by.includes(userId);
-  cur.upvoted_by = has
-    ? cur.upvoted_by.filter((x) => x !== userId)
-    : [...cur.upvoted_by, userId];
-  cur.upvotes_count = Math.max(
-    0,
-    cur.upvotes_count + (has ? -1 : 1)
-  );
-  // keep a base count for seeded items + local delta is already in upvotes_count
+  cur.upvoted_by = has ? cur.upvoted_by.filter((x) => x !== userId) : [...cur.upvoted_by, userId];
+  cur.upvotes_count = Math.max(0, cur.upvotes_count + (has ? -1 : 1));
   all[idx] = cur;
   writeLocal(C_KEY, all);
+  notifyLocal();
   return { ...cur };
 }
 
-export async function addComment(input: {
-  complaint_id: string;
-  user_id: string;
-  user_name: string;
-  role: "student" | "admin";
-  body: string;
-}): Promise<Comment> {
-  const sb = useSupabase();
-  if (sb) {
+export async function updateStatus(complaintId: string, status: Status): Promise<void> {
+  const client = sb();
+  if (client) {
     try {
-      const { data, error } = await sb
-        .from("comments")
-        .insert(input)
-        .select()
-        .single();
-      if (!error && data) return data as unknown as Comment;
-    } catch {}
-  }
-  const c: Comment = {
-    id: uid("m"),
-    created_at: new Date().toISOString(),
-    ...input,
-  };
-  const all = readLocal<Comment[]>(M_KEY, []);
-  all.push(c);
-  writeLocal(M_KEY, all);
-  return c;
-}
-
-export async function updateStatus(
-  complaintId: string,
-  status: Status
-): Promise<void> {
-  const sb = useSupabase();
-  if (sb) {
-    try {
-      await sb.from("complaints").update({ status }).eq("id", complaintId);
+      await client.from("complaints").update({ status }).eq("id", complaintId);
     } catch {}
   }
   const all = readLocal<Complaint[]>(C_KEY, []);
@@ -266,12 +357,56 @@ export async function updateStatus(
     all[idx] = { ...all[idx], status };
     writeLocal(C_KEY, all);
   }
+  notifyLocal();
+}
+
+// ---------------- COMMENTS ----------------
+
+export async function fetchComments(complaintId: string): Promise<Comment[]> {
+  const client = sb();
+  if (client) {
+    try {
+      const { data, error } = await client
+        .from("comments")
+        .select("*")
+        .eq("complaint_id", complaintId)
+        .order("created_at", { ascending: true });
+      if (!error && data) return data as Comment[];
+    } catch {}
+  }
+  return readLocal<Comment[]>(M_KEY, [])
+    .filter((c) => c.complaint_id === complaintId)
+    .sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at));
+}
+
+export async function addComment(input: {
+  complaint_id: string;
+  user_id: string;
+  user_name: string;
+  role: string;
+  body: string;
+}): Promise<Comment> {
+  const client = sb();
+  if (client) {
+    try {
+      const { data, error } = await client.from("comments").insert(input).select().single();
+      if (!error && data) {
+        notifyLocal();
+        return data as Comment;
+      }
+    } catch {}
+  }
+  const c: Comment = { id: uid("m"), created_at: new Date().toISOString(), ...input };
+  const all = readLocal<Comment[]>(M_KEY, []);
+  all.push(c);
+  writeLocal(M_KEY, all);
+  notifyLocal();
+  return c;
 }
 
 export async function uploadImage(file: File): Promise<string | null> {
-  const sb = useSupabase();
-  if (!sb) {
-    // local mode: convert to data URL so image still shows in demo
+  const client = sb();
+  if (!client) {
     return await new Promise((resolve) => {
       const r = new FileReader();
       r.onload = () => resolve(r.result as string);
@@ -282,13 +417,69 @@ export async function uploadImage(file: File): Promise<string | null> {
   try {
     const ext = file.name.split(".").pop() || "jpg";
     const path = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-    const { error } = await sb.storage
-      .from("complaint-images")
-      .upload(path, file, { upsert: false });
+    const { error } = await client.storage.from("complaint-images").upload(path, file, { upsert: false });
     if (error) return null;
-    const { data } = sb.storage.from("complaint-images").getPublicUrl(path);
+    const { data } = client.storage.from("complaint-images").getPublicUrl(path);
     return data.publicUrl;
   } catch {
     return null;
   }
+}
+
+// ---------------- REALTIME ----------------
+// Supabase realtime when configured + local event + polling fallback.
+// Usage: const unsub = subscribeCampusUpdates(() => reload()); return unsub;
+
+export function subscribeCampusUpdates(onUpdate: () => void): () => void {
+  const client = sb();
+  let channel: any = null;
+  let polling: any = null;
+  let lastSeen = Date.now();
+
+  const handler = () => onUpdate();
+  if (typeof window !== "undefined") {
+    window.addEventListener(UPDATE_EVENT, handler);
+    window.addEventListener("storage", handler);
+    const onFocus = () => onUpdate();
+    window.addEventListener("focus", onFocus);
+
+    // Polling fallback: catches cross-device updates in local mode + missed realtime events.
+    // Checks last-write timestamp every 7s; refetches if changed or every 15s regardless.
+    let ticks = 0;
+    polling = setInterval(() => {
+      ticks += 1;
+      try {
+        const w = Number(localStorage.getItem("campusfix_last_write") || 0);
+        if (w > lastSeen || ticks % 2 === 0) {
+          lastSeen = Math.max(lastSeen, w);
+          onUpdate();
+        }
+      } catch {
+        if (ticks % 2 === 0) onUpdate();
+      }
+    }, 7000);
+
+    // Realtime via Supabase when available
+    try {
+      if (client) {
+        channel = client
+          .channel("campusfix-live")
+          .on("postgres_changes", { event: "*", schema: "public", table: "complaints" }, () => onUpdate())
+          .on("postgres_changes", { event: "*", schema: "public", table: "comments" }, () => onUpdate())
+          .on("postgres_changes", { event: "*", schema: "public", table: "upvotes" }, () => onUpdate())
+          .subscribe();
+      }
+    } catch {}
+
+    return () => {
+      window.removeEventListener(UPDATE_EVENT, handler);
+      window.removeEventListener("storage", handler);
+      window.removeEventListener("focus", onFocus);
+      if (polling) clearInterval(polling);
+      try {
+        if (channel && client) client.removeChannel(channel);
+      } catch {}
+    };
+  }
+  return () => {};
 }

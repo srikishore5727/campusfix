@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { canManageComplaints } from "@/lib/types";
 
 export default function Navbar() {
   const path = usePathname();
@@ -13,7 +14,7 @@ export default function Navbar() {
     <Link
       key={href}
       href={href}
-      className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
+      className={`flex min-h-[40px] items-center rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
         path === href
           ? "bg-zinc-900 text-white"
           : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
@@ -24,50 +25,49 @@ export default function Navbar() {
   );
 
   return (
-    <header className="sticky top-0 z-20 border-b border-zinc-200 bg-white/90 backdrop-blur">
-      <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3">
-        <Link href="/" className="flex items-center gap-2">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-zinc-900 text-lg font-bold text-white">
+    <header className="sticky top-0 z-20 border-b border-zinc-200 bg-white/95 backdrop-blur">
+      <div className="mx-auto flex max-w-5xl items-center justify-between gap-2 px-3 py-2.5 sm:px-4">
+        <Link href="/" className="flex min-w-0 items-center gap-2">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-zinc-900 text-lg font-bold text-white">
             C
           </span>
-          <span className="leading-tight">
-            <span className="block text-base font-bold">CampusFix</span>
-            <span className="block text-xs text-zinc-500">
-              Hostel complaint tracker
+          <span className="min-w-0 leading-tight">
+            <span className="block truncate text-[15px] font-bold">CampusFix</span>
+            <span className="block max-w-[180px] truncate text-[11px] text-zinc-500 sm:max-w-[260px]">
+              {user ? user.campus_name : "Multi-campus issue tracker"}
             </span>
           </span>
         </Link>
 
-        <nav className="hidden items-center gap-1 sm:flex">
+        <nav className="hidden items-center gap-1 md:flex">
           {link("/", "Feed")}
-          {link("/new", "Report")}
+          {user && link("/new", "Report")}
           {user && link("/my", "My issues")}
-          {user?.role === "admin" && link("/admin", "Admin")}
+          {user && canManageComplaints(user.role) && link("/admin", "Dashboard")}
         </nav>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {!user ? (
             <Link
               href="/login"
-              className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-700"
+              className="flex min-h-[42px] items-center rounded-full bg-zinc-900 px-5 py-2 text-sm font-semibold text-white transition hover:bg-zinc-700"
             >
               Login
             </Link>
           ) : (
             <>
-              <span className="hidden max-w-[160px] truncate text-right text-xs leading-tight text-zinc-600 md:block">
-                <span className="block font-semibold text-zinc-900">
-                  {user.name}
+              <span className="hidden max-w-[180px] truncate text-right text-xs leading-tight text-zinc-600 lg:block">
+                <span className="block truncate font-semibold text-zinc-900">{user.name}</span>
+                <span className="capitalize">
+                  {user.role === "campus_admin" ? "Campus admin" : user.role}
                 </span>
-                {user.role === "admin" ? "Warden (admin)" : user.email}
               </span>
               <button
                 onClick={() => {
                   logout();
-                  router.push("/");
-                  router.refresh();
+                  router.push("/login");
                 }}
-                className="rounded-full border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-100"
+                className="flex min-h-[42px] items-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium transition hover:bg-zinc-100"
               >
                 Logout
               </button>
@@ -75,11 +75,11 @@ export default function Navbar() {
           )}
         </div>
       </div>
-      <div className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-4 pb-2 sm:hidden">
+      <div className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-3 pb-2 md:hidden">
         {link("/", "Feed")}
-        {link("/new", "Report")}
+        {user && link("/new", "Report")}
         {user && link("/my", "My issues")}
-        {user?.role === "admin" && link("/admin", "Admin")}
+        {user && canManageComplaints(user.role) && link("/admin", "Dashboard")}
       </div>
     </header>
   );

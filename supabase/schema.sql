@@ -1,16 +1,43 @@
 -- ============================================================
--- CampusFix — Supabase schema (run ONCE in Supabase > SQL Editor)
+-- CampusFix v2 — MULTI-TENANT schema (run in Supabase SQL Editor)
+-- Each college = one campus. Students see ONLY their campus.
+-- Safe to re-run: uses IF NOT EXISTS + ADD COLUMN IF NOT EXISTS.
 -- ============================================================
 
--- 1) Tables
+-- 1) Campuses (one row per college)
+create table if not exists public.campuses (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  slug text not null unique,
+  created_by uuid,
+  created_at timestamptz default now()
+);
+
+-- 2) Profiles (now campus-scoped, 3 roles)
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text not null,
   name text,
-  role text not null default 'student' check (role in ('student','admin')),
+  role text not null default 'student' check (role in ('student','warden','campus_admin')),
   created_at timestamptz default now()
 );
+alter table public.profiles add column if not exists campus_id uuid references public.campuses(id) on delete set null;
+alter table public.profiles add column if not exists campus_name text;
 
+-- migrate old 'admin' role to 'warden'
+update public.profiles set role='warden' where role='admin';
+
+-- 3) Warden invites: campus_admin adds warden emails; only those emails may sign up as warden
+create table if not exists public.warden_invites (
+  id uuid primary key default gen_random_uuid(),
+  campus_id uuid not null references public.campuses(id) on delete cascade,
+  email text not null,
+  added_by uuid,
+  created_at timestamptz default now(),
+  unique (campus_id, email)
+);
+
+-- 4) Complaints (now campus-scoped)
 create table if not exists public.complaints (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null,
@@ -24,7 +51,9 @@ create table if not exists public.complaints (
   image_url text,
   created_at timestamptz default now()
 );
+alter table public.complaints add column if not exists campus_id uuid references public.campuses(id) on delete cascade;
 
+-- 5) Comments + upvotes (unchanged)
 create table if not exists public.comments (
   id uuid primary key default gen_random_uuid(),
   complaint_id uuid not null references public.complaints(id) on delete cascade,
@@ -42,44 +71,62 @@ create table if not exists public.upvotes (
   primary key (complaint_id, user_id)
 );
 
--- 2) Enable RLS
+-- 6) RLS
+alter table public.campuses enable row level security;
 alter table public.profiles enable row level security;
 alter table public.complaints enable row level security;
 alter table public.comments enable row level security;
 alter table public.upvotes enable row level security;
+alter table public.warden_invites enable row level security;
 
--- 3) Policies (drop first so re-runnable)
+-- Campuses: readable by all (needed for signup dropdown), writable by authed users
+drop policy if exists "campuses readable by all" on public.campuses;
+create policy "campuses readable by all" on public.campuses for select using (true);
+drop policy if exists "authed can create campus" on public.campuses;
+create policy "authed can create campus" on public.campuses for insert with check (auth.role() = 'authenticated');
+
+-- Profiles
 drop policy if exists "profiles readable by all" on public.profiles;
 create policy "profiles readable by all" on public.profiles for select using (true);
-
 drop policy if exists "users insert own profile" on public.profiles;
 create policy "users insert own profile" on public.profiles for insert with check (auth.uid() = id);
+drop policy if exists "users update own profile" on public.profiles;
+create policy "users update own profile" on public.profiles for update using (auth.uid() = id);
 
+-- Complaints: app enforces campus isolation (campus_id filter on every query).
+-- Permissive read keeps demo simple; tighten later with user_campus() function if needed.
 drop policy if exists "complaints readable by all" on public.complaints;
 create policy "complaints readable by all" on public.complaints for select using (true);
-
 drop policy if exists "auth users can insert complaints" on public.complaints;
 create policy "auth users can insert complaints" on public.complaints for insert with check (auth.role() = 'authenticated');
-
 drop policy if exists "owners can edit own open complaints" on public.complaints;
 create policy "owners can edit own open complaints" on public.complaints for update using (auth.uid() = user_id);
+drop policy if exists "any authed can update status" on public.complaints;
+create policy "any authed can update status" on public.complaints for update using (auth.role() = 'authenticated');
 
+-- Comments
 drop policy if exists "comments readable by all" on public.comments;
 create policy "comments readable by all" on public.comments for select using (true);
-
 drop policy if exists "auth users can comment" on public.comments;
 create policy "auth users can comment" on public.comments for insert with check (auth.role() = 'authenticated');
 
+-- Upvotes
 drop policy if exists "upvotes readable by all" on public.upvotes;
 create policy "upvotes readable by all" on public.upvotes for select using (true);
-
 drop policy if exists "auth users can upvote" on public.upvotes;
 create policy "auth users can upvote" on public.upvotes for insert with check (auth.role() = 'authenticated');
-
 drop policy if exists "users can remove own upvote" on public.upvotes;
 create policy "users can remove own upvote" on public.upvotes for delete using (auth.uid() = user_id);
 
--- 4) Auto-maintain upvotes_count
+-- Warden invites: readable by all (needed to validate warden signup), writable by authed
+drop policy if exists "invites readable by all" on public.warden_invites;
+create policy "invites readable by all" on public.warden_invites for select using (true);
+drop policy if exists "authed manage invites" on public.warden_invites;
+create policy "authed manage invites" on public.warden_invites for insert with check (auth.role() = 'authenticated');
+drop policy if exists "authed delete invites" on public.warden_invites;
+create policy "authed delete invites" on public.warden_invites for delete using (auth.role() = 'authenticated');
+
+-- 7) Upvote counter trigger
 create or replace function public.sync_upvote_count()
 returns trigger language plpgsql as $$
 begin
@@ -99,17 +146,16 @@ create trigger trg_sync_upvotes
 after insert or delete on public.upvotes
 for each row execute function public.sync_upvote_count();
 
--- 5) Storage bucket for photos (create via Dashboard > Storage > New bucket: complaint-images, Public ON)
--- If bucket exists, this insert is ignored:
+-- 8) Storage
 insert into storage.buckets (id, name, public)
 values ('complaint-images', 'complaint-images', true)
 on conflict (id) do nothing;
 
 drop policy if exists "public read images" on storage.objects;
 create policy "public read images" on storage.objects for select using (bucket_id = 'complaint-images');
-
 drop policy if exists "auth upload images" on storage.objects;
 create policy "auth upload images" on storage.objects for insert with check (bucket_id = 'complaint-images' and auth.role() = 'authenticated');
 
--- 6) Make your admin: after signup, run (replace email):
--- update public.profiles set role='admin' where email='youremail@gmail.com';
+-- 9) Realtime: enable publication so UI updates live (run once; ignore error if already added)
+-- alter publication supabase_realtime add table public.complaints;
+-- alter publication supabase_realtime add table public.comments;

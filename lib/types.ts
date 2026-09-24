@@ -1,4 +1,7 @@
-export type Role = "student" | "admin";
+export type Role = "student" | "warden" | "campus_admin";
+// Back-compat: old "admin" maps to "warden"
+export type LegacyRole = Role | "admin";
+
 export type Status = "open" | "in_progress" | "resolved";
 export type Category =
   | "Water"
@@ -8,15 +11,33 @@ export type Category =
   | "Mess"
   | "Other";
 
+export interface Campus {
+  id: string;
+  name: string;
+  slug: string;
+  created_at: string;
+}
+
 export interface AppUser {
   id: string;
   name: string;
   email: string;
   role: Role;
+  campus_id: string;
+  campus_name: string;
+}
+
+export interface WardenInvite {
+  id: string;
+  campus_id: string;
+  email: string;
+  added_by: string;
+  created_at: string;
 }
 
 export interface Complaint {
   id: string;
+  campus_id: string;
   user_id: string;
   user_name: string;
   title: string;
@@ -25,7 +46,7 @@ export interface Complaint {
   block: string;
   status: Status;
   upvotes_count: number;
-  upvoted_by: string[]; // user ids (local mode) — in Supabase mode derived from upvotes table
+  upvoted_by: string[];
   image_url: string | null;
   created_at: string;
 }
@@ -35,7 +56,7 @@ export interface Comment {
   complaint_id: string;
   user_id: string;
   user_name: string;
-  role: Role;
+  role: string;
   body: string;
   created_at: string;
 }
@@ -56,6 +77,16 @@ export const STATUS_LABEL: Record<Status, string> = {
   in_progress: "In Progress",
   resolved: "Resolved",
 };
+
+export function normalizeRole(r: string): Role {
+  if (r === "admin" || r === "warden") return "warden";
+  if (r === "campus_admin") return "campus_admin";
+  return "student";
+}
+
+export function canManageComplaints(role: Role) {
+  return role === "warden" || role === "campus_admin";
+}
 
 export function isSupabaseConfigured() {
   return Boolean(

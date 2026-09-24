@@ -214,8 +214,8 @@ export default function TeamPage() {
       <section className="rounded-3xl border bg-white p-4 sm:p-5">
         <h2 className="font-bold">Decision emails ({mails.length})</h2>
         <p className="text-xs text-zinc-500">
-          Auto-sent on approve/decline. Configure <code>RESEND_API_KEY</code> in Vercel for real delivery;
-          without it, mails are logged here (simulated).
+          Auto-sent on approve/decline from your Gmail (set GMAIL_USER + GMAIL_APP_PASSWORD). Without it,
+          mails are only logged here.
         </p>
         <div className="mt-3 max-h-80 space-y-2 overflow-y-auto">
           {mails.length === 0 && <p className="text-sm text-zinc-500">No emails yet.</p>}

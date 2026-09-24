@@ -298,6 +298,28 @@ export async function reviewCampus(
     sent: false,
   };
 
+  // Send first so the audit row records the TRUE delivery outcome.
+  let delivered = false;
+  try {
+    const res = await fetch("/api/notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: note.to_email,
+        subject: note.subject,
+        body: note.body,
+        campusId: note.campus_id,
+        kind: note.kind,
+      }),
+    });
+    const j = await res.json().catch(() => ({}));
+    delivered = Boolean(j?.delivered);
+    if (!delivered && j?.error) cloudError("reviewCampus/mail", j.error);
+  } catch (e) {
+    cloudError("reviewCampus/mail", e);
+  }
+  note.sent = delivered;
+
   if (client) {
     const { data, error } = await client
       .from("notifications")
@@ -310,6 +332,7 @@ export async function reviewCampus(
         subject: note.subject,
         body: note.body,
         reason: note.reason,
+        sent: delivered,
       })
       .select()
       .single();
@@ -317,28 +340,12 @@ export async function reviewCampus(
       cloudError("reviewCampus/notify-log", error);
     } else if (data) {
       note.id = (data as any).id || note.id;
-      note.sent = true;
     }
   } else {
     const mails = readLocal<CampusNotification[]>(MAIL_KEY, []);
-    mails.unshift({ ...note, sent: note.sent });
+    mails.unshift({ ...note });
     writeLocal(MAIL_KEY, mails);
   }
-
-  // fire-and-forget real email (Resend when configured, else simulated log)
-  try {
-    await fetch("/api/notify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        to: note.to_email,
-        subject: note.subject,
-        body: note.body,
-        campusId: note.campus_id,
-        kind: note.kind,
-      }),
-    });
-  } catch {}
 
   notifyLocal();
   return note;
@@ -481,7 +488,9 @@ export async function fetchComplaintById(id: string): Promise<Complaint | null> 
       cloudError("fetchComplaintById", error);
       throw new Error(`Database error: ${error.message}`);
     }
-    return (data as Complaint) || null;
+    if (!data) return null;
+    // complaints table has no upvoted_by column — callers merge viewer state via fetchUserUpvotedIds
+    return { ...(data as Complaint), upvoted_by: [] };
   }
   ensureSeed();
   return readLocal<Complaint[]>(C_KEY, []).find((c) => c.id === id) || null;

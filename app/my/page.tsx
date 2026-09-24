@@ -58,7 +58,7 @@ export default function MyPage() {
             <ComplaintCard
               key={c.id}
               c={c}
-              voted={c.upvoted_by.includes(user!.id)}
+              voted={(c.upvoted_by || []).includes(user!.id)}
               onUpvote={async (x) => {
                 if (voting[x.id]) return;
                 setVoting((p) => ({ ...p, [x.id]: true }));

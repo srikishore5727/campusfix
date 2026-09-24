@@ -40,21 +40,32 @@ export async function POST(req: Request) {
         // fall through to simulated log rather than failing the review flow
       }
     }
+
     if (!key) {
-      console.log(`[CampusFix mail:simulated] to=${to} subject=${subject}`);
-      return NextResponse.json({ ok: true, simulated: true });
+      console.log(`[CampusFix mail:logged] to=${to} subject=${subject}`);
+      return NextResponse.json({ ok: true, delivered: false, simulated: true });
     }
 
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from, to, subject, text: body }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      return NextResponse.json({ ok: false, error: (data as any)?.message || "Resend failed." }, { status: 502 });
+    try {
+      const res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ from, to, subject, text: body }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.log(`[CampusFix mail:resend-failed] to=${to} err=${(data as any)?.message}`);
+        return NextResponse.json({
+          ok: true,
+          delivered: false,
+          error: (data as any)?.message || "Resend failed. Verify your sending domain at resend.com/domains.",
+        });
+      }
+      return NextResponse.json({ ok: true, delivered: true, id: (data as any)?.id });
+    } catch (e: any) {
+      console.log(`[CampusFix mail:error] to=${to} err=${e?.message}`);
+      return NextResponse.json({ ok: true, delivered: false, error: e?.message || "Send failed." });
     }
-    return NextResponse.json({ ok: true, id: (data as any)?.id });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "Notify failed." }, { status: 500 });
   }

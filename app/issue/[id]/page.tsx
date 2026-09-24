@@ -114,7 +114,7 @@ export default function IssuePage({ params }: { params: Promise<{ id: string }> 
       </div>
     );
 
-  const voted = item.upvoted_by.includes(user.id);
+  const voted = (item.upvoted_by || []).includes(user.id);
   const canManage = canManageComplaints(user.role);
 
   async function onUpvote() {
@@ -125,7 +125,7 @@ export default function IssuePage({ params }: { params: Promise<{ id: string }> 
     setItem({
       ...item!,
       upvotes_count: wasVoted ? item!.upvotes_count - 1 : item!.upvotes_count + 1,
-      upvoted_by: wasVoted ? item!.upvoted_by.filter((x) => x !== user!.id) : [...item!.upvoted_by, user!.id],
+      upvoted_by: wasVoted ? (item!.upvoted_by || []).filter((x) => x !== user!.id) : [...(item!.upvoted_by || []), user!.id],
     });
     try {
       setItem(await toggleUpvote(item!, user!.id));

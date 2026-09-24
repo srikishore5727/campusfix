@@ -62,13 +62,17 @@ export default function TeamPage() {
     setBusy(id);
     setMsg("");
     try {
-      await reviewCampus(id, decision, reason[id] || "", user.email);
+      const note = await reviewCampus(id, decision, reason[id] || "", user.email);
       setReason((p) => ({ ...p, [id]: "" }));
       await load();
       setMsg(
         decision === "approved"
-          ? "Approved — notification email sent to the campus contact."
-          : "Declined — notification email with the reason sent to the campus contact."
+          ? note.sent
+            ? "Approved — notification email delivered."
+            : "Approved — logged, but email NOT delivered (check Resend domain/key; see Decision emails)."
+          : note.sent
+            ? "Declined — notification email delivered."
+            : "Declined — logged, but email NOT delivered (check Resend domain/key; see Decision emails)."
       );
     } catch (e: any) {
       setMsg(e?.message || "Action failed.");
@@ -218,7 +222,10 @@ export default function TeamPage() {
           {mails.map((m) => (
             <div key={m.id} className="rounded-xl border bg-zinc-50 p-3 text-sm">
               <p className="text-xs font-bold">
-                [{m.kind.toUpperCase()}] {m.subject}
+                [{m.kind.toUpperCase()}] {m.subject}{" "}
+                <span className={`ml-1 rounded-full px-2 py-0.5 text-[10px] ${m.sent ? "bg-green-600 text-white" : "bg-amber-200 text-amber-900"}`}>
+                  {m.sent ? "DELIVERED" : "LOGGED ONLY"}
+                </span>
               </p>
               <p className="text-xs text-zinc-500">to {m.to_name} &lt;{m.to_email}&gt; • {new Date(m.created_at).toLocaleString()}</p>
               <p className="mt-1 whitespace-pre-wrap text-[13px] leading-relaxed">{m.body}</p>

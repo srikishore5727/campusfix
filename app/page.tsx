@@ -88,12 +88,12 @@ export default function Home() {
         x.id === c.id
           ? {
               ...x,
-              upvotes_count: x.upvoted_by.includes(user.id)
+              upvotes_count: (x.upvoted_by || []).includes(user.id)
                 ? x.upvotes_count - 1
                 : x.upvotes_count + 1,
-              upvoted_by: x.upvoted_by.includes(user.id)
-                ? x.upvoted_by.filter((id) => id !== user.id)
-                : [...x.upvoted_by, user.id],
+              upvoted_by: (x.upvoted_by || []).includes(user.id)
+                ? (x.upvoted_by || []).filter((id) => id !== user.id)
+                : [...(x.upvoted_by || []), user.id],
             }
           : x
       )
@@ -296,7 +296,7 @@ export default function Home() {
       ) : (
         <div className="grid gap-3">
           {visible.map((c) => (
-            <ComplaintCard key={c.id} c={c} voted={Boolean(user && c.upvoted_by.includes(user.id))} onUpvote={onUpvote} />
+            <ComplaintCard key={c.id} c={c} voted={Boolean(user && (c.upvoted_by || []).includes(user.id))} onUpvote={onUpvote} />
           ))}
         </div>
       )}

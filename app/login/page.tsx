@@ -87,7 +87,13 @@ export default function LoginPage() {
           ))}
         </div>
 
-        <div className="mt-4 space-y-3">
+        <form
+          className="mt-4 space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!busy) (mode === "login" ? submitLogin() : submitRegister());
+          }}
+        >
           {mode === "register" && (
             <input
               value={campusName}
@@ -117,7 +123,7 @@ export default function LoginPage() {
           {ok && <p className="rounded-xl bg-green-50 border border-green-200 p-3 text-xs font-medium text-green-700">{ok}</p>}
 
           <button
-            onClick={mode === "login" ? submitLogin : submitRegister}
+            type="submit"
             disabled={busy}
             className="min-h-[48px] w-full rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-bold text-white transition hover:bg-zinc-700 active:scale-[0.99] disabled:opacity-50"
           >
@@ -129,7 +135,7 @@ export default function LoginPage() {
               ? "Not registered yet? Ask your campus admin to add your Name + Email (they can bulk-upload a CSV). Emails are unique — one email works in one campus only."
               : "One registration per campus (duplicates like IIT Madras / iit-madras are blocked). After approval, add wardens + students from Admin → Members."}
           </p>
-        </div>
+        </form>
       </div>
     </div>
   );

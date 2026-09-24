@@ -8,6 +8,8 @@ import {
   ensureSeed,
   fetchCampusById,
   fetchComplaints,
+  fetchUserUpvotedIds,
+  mergeVotedState,
   subscribeCampusUpdates,
   toggleUpvote,
 } from "@/lib/store";
@@ -26,8 +28,17 @@ export default function Home() {
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const [campus, setCampus] = useState<Campus | null>(null);
   const [dbError, setDbError] = useState("");
+  const [voting, setVoting] = useState<Record<string, boolean>>({});
+  const userId = user?.id || "";
 
   const campusId = user?.campus_id || "";
+
+  // Team accounts have no campus feed
+  useEffect(() => {
+    if (!authLoading && user?.role === "super_admin") {
+      window.location.href = "/team";
+    }
+  }, [authLoading, user?.role]);
 
   const load = useCallback(async () => {
     if (!campusId) {
@@ -40,7 +51,9 @@ export default function Home() {
         fetchComplaints(campusId),
         fetchCampusById(campusId),
       ]);
-      setItems(data);
+      const viewer = userId;
+      const voted = viewer ? await fetchUserUpvotedIds(viewer, data.map((d) => d.id)) : new Set<string>();
+      setItems(mergeVotedState(data, voted, viewer));
       setCampus(c);
       setDbError("");
       setLoading(false);
@@ -49,7 +62,7 @@ export default function Home() {
       setDbError(e?.message || "Could not load campus data.");
       setLoading(false);
     }
-  }, [campusId]);
+  }, [campusId, userId]);
 
   useEffect(() => {
     if (!authLoading) load();
@@ -67,6 +80,8 @@ export default function Home() {
       window.location.href = "/login";
       return;
     }
+    if (voting[c.id]) return; // ignore rapid double-taps while one toggle is in flight
+    setVoting((p) => ({ ...p, [c.id]: true }));
     // optimistic update for instant feel
     setItems((prev) =>
       prev.map((x) =>
@@ -83,10 +98,15 @@ export default function Home() {
           : x
       )
     );
-    const updated = await toggleUpvote(c, user.id);
-    setItems((prev) => prev.map((x) => (x.id === c.id ? { ...updated, upvoted_by: updated.upvoted_by.length ? updated.upvoted_by : prev.find((p) => p.id === c.id)?.upvoted_by || [] } : x)));
-    // refetch to get true server count (fixes stale vote counts)
-    load();
+    try {
+      const updated = await toggleUpvote(c, user.id);
+      // server is authoritative for count + viewer state
+      setItems((prev) => prev.map((x) => (x.id === c.id ? updated : x)));
+    } catch {
+      load(); // resync on failure
+    } finally {
+      setVoting((p) => ({ ...p, [c.id]: false }));
+    }
   }
 
   const counts = useMemo(

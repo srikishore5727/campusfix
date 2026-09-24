@@ -8,6 +8,7 @@ import {
   addComment,
   fetchComments,
   fetchComplaintById,
+  fetchUserUpvotedIds,
   subscribeCampusUpdates,
   toggleUpvote,
   updateStatus,
@@ -24,6 +25,8 @@ export default function IssuePage({ params }: { params: Promise<{ id: string }> 
   const [loading, setLoading] = useState(true);
   const [denied, setDenied] = useState(false);
   const [dbError, setDbError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [voting, setVoting] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -38,6 +41,10 @@ export default function IssuePage({ params }: { params: Promise<{ id: string }> 
         setLoading(false);
         return;
       }
+      if (user) {
+        const voted = await fetchUserUpvotedIds(user.id, [c.id]);
+        if (voted.has(c.id)) c.upvoted_by = [user.id];
+      }
       setItem(c);
       setComments(await fetchComments(id));
       setDbError("");
@@ -46,7 +53,7 @@ export default function IssuePage({ params }: { params: Promise<{ id: string }> 
     } finally {
       setLoading(false);
     }
-  }, [id, user?.campus_id]);
+  }, [id, user?.campus_id, user?.id]);
 
   useEffect(() => {
     if (!authLoading) load();
@@ -111,32 +118,55 @@ export default function IssuePage({ params }: { params: Promise<{ id: string }> 
   const canManage = canManageComplaints(user.role);
 
   async function onUpvote() {
+    if (voting) return;
+    setVoting(true);
+    setActionError("");
+    const wasVoted = voted;
     setItem({
       ...item!,
-      upvotes_count: voted ? item!.upvotes_count - 1 : item!.upvotes_count + 1,
-      upvoted_by: voted ? item!.upvoted_by.filter((x) => x !== user!.id) : [...item!.upvoted_by, user!.id],
+      upvotes_count: wasVoted ? item!.upvotes_count - 1 : item!.upvotes_count + 1,
+      upvoted_by: wasVoted ? item!.upvoted_by.filter((x) => x !== user!.id) : [...item!.upvoted_by, user!.id],
     });
-    const updated = await toggleUpvote(item!, user!.id);
-    setItem({ ...updated, upvoted_by: updated.upvoted_by.length ? updated.upvoted_by : item!.upvoted_by });
+    try {
+      setItem(await toggleUpvote(item!, user!.id));
+    } catch (e: any) {
+      setActionError(e?.message || "Upvote failed.");
+      load();
+    } finally {
+      setVoting(false);
+    }
   }
 
   async function sendComment() {
     if (body.trim().length < 2) return;
+    setActionError("");
     const cur = item!;
-    const c = await addComment({
-      complaint_id: cur.id,
-      user_id: user!.id,
-      user_name: user!.name,
-      role: user!.role,
-      body: body.trim(),
-    });
-    setComments((p) => [...p, c]);
-    setBody("");
+    try {
+      const c = await addComment({
+        complaint_id: cur.id,
+        user_id: user!.id,
+        user_name: user!.name,
+        role: user!.role,
+        body: body.trim(),
+      });
+      setComments((p) => [...p, c]);
+      setBody("");
+    } catch (e: any) {
+      setActionError(e?.message || "Could not post comment.");
+    }
   }
 
   async function setStatus(s: Status) {
-    await updateStatus(item!.id, s);
+    if (s === item!.status) return;
+    setActionError("");
+    const prev = item!.status;
     setItem({ ...item!, status: s });
+    try {
+      await updateStatus(item!.id, s);
+    } catch (e: any) {
+      setItem({ ...item!, status: prev });
+      setActionError(e?.message || "Status update failed.");
+    }
   }
 
   return (
@@ -170,6 +200,12 @@ export default function IssuePage({ params }: { params: Promise<{ id: string }> 
             {voted ? "▲ Upvoted" : "△ Upvote"} • {item.upvotes_count}
           </button>
         </div>
+
+        {actionError && (
+          <p className="mt-3 rounded-xl bg-red-50 border border-red-200 p-3 text-xs font-medium text-red-700">
+            {actionError}
+          </p>
+        )}
 
         {canManage && (
           <div className="mt-4 rounded-2xl border bg-zinc-50 p-3 sm:p-4">

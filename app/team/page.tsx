@@ -58,6 +58,7 @@ export default function TeamPage() {
 
   async function decide(id: string, decision: "approved" | "rejected") {
     if (!user) return;
+    if (decision === "rejected" && !confirm("Decline this campus? A decline email with your reason will be sent.")) return;
     setBusy(id);
     setMsg("");
     try {
@@ -84,7 +85,13 @@ export default function TeamPage() {
           <p className="mt-1 text-sm text-zinc-500">
             For the app team only (you + your friend). Campus users login on the main login page.
           </p>
-          <div className="mt-4 space-y-3">
+          <form
+            className="mt-4 space-y-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              teamLogin();
+            }}
+          >
             <input
               value={tName}
               onChange={(e) => setTName(e.target.value)}
@@ -100,12 +107,12 @@ export default function TeamPage() {
             />
             {tErr && <p className="rounded-xl bg-red-50 border border-red-200 p-3 text-xs font-medium text-red-700">{tErr}</p>}
             <button
-              onClick={teamLogin}
+              type="submit"
               className="min-h-[48px] w-full rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-bold text-white hover:bg-zinc-700"
             >
               Login as team
             </button>
-          </div>
+          </form>
         </div>
       </div>
     );

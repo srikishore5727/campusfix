@@ -4,13 +4,14 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import ComplaintCard from "@/components/ComplaintCard";
 import { useAuth } from "@/lib/auth";
-import { fetchComplaints, subscribeCampusUpdates, toggleUpvote } from "@/lib/store";
+import { fetchComplaints, fetchUserUpvotedIds, mergeVotedState, subscribeCampusUpdates, toggleUpvote } from "@/lib/store";
 import type { Complaint } from "@/lib/types";
 
 export default function MyPage() {
   const { user, loading: authLoading } = useAuth();
   const [items, setItems] = useState<Complaint[]>([]);
   const [loading, setLoading] = useState(true);
+  const [voting, setVoting] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     if (!user) {
@@ -19,7 +20,8 @@ export default function MyPage() {
     }
     try {
       const all = await fetchComplaints(user.campus_id);
-      setItems(all.filter((c) => c.user_id === user.id));
+      const voted = await fetchUserUpvotedIds(user.id, all.map((c) => c.id));
+      setItems(mergeVotedState(all, voted, user.id).filter((c) => c.user_id === user.id));
     } catch (e: any) {
       setItems([]);
     } finally {
@@ -43,7 +45,7 @@ export default function MyPage() {
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-bold sm:text-2xl">My issues ({items.length})</h1>
-      <p className="text-sm text-zinc-500">Only you + your campus wardens see these.</p>
+      <p className="text-sm text-zinc-500">Reports you filed in {user?.campus_name} — visible to your whole campus.</p>
       {loading ? (
         <p className="text-sm text-zinc-500">Loading…</p>
       ) : items.length === 0 ? (
@@ -58,8 +60,14 @@ export default function MyPage() {
               c={c}
               voted={c.upvoted_by.includes(user!.id)}
               onUpvote={async (x) => {
-                const u = await toggleUpvote(x, user!.id);
-                setItems((p) => p.map((y) => (y.id === x.id ? u : y)));
+                if (voting[x.id]) return;
+                setVoting((p) => ({ ...p, [x.id]: true }));
+                try {
+                  const u = await toggleUpvote(x, user!.id);
+                  setItems((p) => p.map((y) => (y.id === x.id ? u : y)));
+                } finally {
+                  setVoting((p) => ({ ...p, [x.id]: false }));
+                }
               }}
             />
           ))}

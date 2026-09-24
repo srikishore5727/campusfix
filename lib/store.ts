@@ -539,18 +539,21 @@ export async function toggleUpvote(complaint: Complaint, userId: string): Promis
       cloudError("toggleUpvote/read", readErr);
       throw new Error(`Database error: ${readErr.message}`);
     }
+    let added: boolean;
     if (existing) {
       const { error } = await client.from("upvotes").delete().eq("complaint_id", complaint.id).eq("user_id", userId);
       if (error) {
         cloudError("toggleUpvote/delete", error);
         throw new Error(`Database error: ${error.message}`);
       }
+      added = false;
     } else {
       const { error } = await client.from("upvotes").insert({ complaint_id: complaint.id, user_id: userId });
       if (error) {
         cloudError("toggleUpvote/insert", error);
         throw new Error(`Database error: ${error.message}`);
       }
+      added = true;
     }
     const { data, error } = await client.from("complaints").select("*").eq("id", complaint.id).single();
     if (error) {
@@ -558,7 +561,8 @@ export async function toggleUpvote(complaint: Complaint, userId: string): Promis
       throw new Error(`Database error: ${error.message}`);
     }
     notifyLocal();
-    return { ...(data as Complaint), upvoted_by: complaint.upvoted_by };
+    // complaints table has no upvoted_by column — derive the viewer's state from the action just taken
+    return { ...(data as Complaint), upvoted_by: added ? [userId] : [] };
   }
   const all = readLocal<Complaint[]>(C_KEY, []);
   const idx = all.findIndex((c) => c.id === complaint.id);
@@ -571,6 +575,28 @@ export async function toggleUpvote(complaint: Complaint, userId: string): Promis
   writeLocal(C_KEY, all);
   notifyLocal();
   return { ...cur };
+}
+
+// Which of these complaints has this viewer upvoted? (cloud mode only —
+// the complaints table carries counts, the upvotes table carries per-user state)
+export async function fetchUserUpvotedIds(userId: string, complaintIds: string[]): Promise<Set<string>> {
+  const client = sb();
+  if (!client || !userId || complaintIds.length === 0) return new Set();
+  const { data, error } = await client
+    .from("upvotes")
+    .select("complaint_id")
+    .eq("user_id", userId)
+    .in("complaint_id", complaintIds.slice(0, 200));
+  if (error) {
+    cloudError("fetchUserUpvotedIds", error);
+    return new Set();
+  }
+  return new Set(((data || []) as any[]).map((r) => r.complaint_id));
+}
+
+export function mergeVotedState(list: Complaint[], votedIds: Set<string>, userId: string): Complaint[] {
+  if (votedIds.size === 0) return list;
+  return list.map((c) => (votedIds.has(c.id) ? { ...c, upvoted_by: [userId] } : c));
 }
 
 export async function updateStatus(complaintId: string, status: Status): Promise<void> {
@@ -796,7 +822,8 @@ export function parseRosterCsv(text: string): { name: string; email: string; rol
 export async function bulkAddMembers(
   campusId: string,
   csvText: string,
-  addedBy: string
+  addedBy: string,
+  onProgress?: (done: number, total: number) => void
 ): Promise<BulkResult> {
   void addedBy;
   const rows = parseRosterCsv(csvText).slice(0, 1000);
@@ -810,6 +837,7 @@ export async function bulkAddMembers(
     } catch (e: any) {
       skipped.push({ line: i + 1, reason: e?.message || "Skipped" });
     }
+    if (onProgress && (i % 5 === 4 || i === rows.length - 1)) onProgress(i + 1, rows.length);
   }
   return { added, skipped };
 }
@@ -849,8 +877,12 @@ export function subscribeCampusUpdates(onUpdate: () => void): () => void {
 
     // Polling fallback: catches cross-device updates in local mode + missed realtime events.
     // Checks last-write timestamp every 7s; refetches if changed or every 15s regardless.
+    // Skipped while the tab is hidden (saves battery + avoids background refetch storms).
     let ticks = 0;
     polling = setInterval(() => {
+      try {
+        if (typeof document !== "undefined" && document.hidden) return;
+      } catch {}
       ticks += 1;
       try {
         const w = Number(localStorage.getItem("campusfix_last_write") || 0);

@@ -79,11 +79,20 @@ alter table public.comments enable row level security;
 alter table public.upvotes enable row level security;
 alter table public.warden_invites enable row level security;
 
--- Campuses: readable by all (needed for signup dropdown), writable by authed users
+-- NOTE (v4): CampusFix uses passwordless roster login (Name+Email checked against
+-- public.members) and talks to Supabase with the anon key and NO Supabase Auth
+-- session. So RLS cannot use auth.uid()/authenticated here — every query runs as
+-- 'anon'. Tenancy + roles are enforced in the app layer (lib/store.ts scopes every
+-- query by campus_id; /team is gated by team emails). Policies below are therefore
+-- permissive by design. If you later add Supabase Auth, tighten them with
+-- auth.uid()-based checks.
 drop policy if exists "campuses readable by all" on public.campuses;
 create policy "campuses readable by all" on public.campuses for select using (true);
 drop policy if exists "authed can create campus" on public.campuses;
-create policy "authed can create campus" on public.campuses for insert with check (auth.role() = 'authenticated');
+drop policy if exists "anyone can register campus" on public.campuses;
+create policy "anyone can register campus" on public.campuses for insert with check (true);
+drop policy if exists "team can review campus" on public.campuses;
+create policy "team can review campus" on public.campuses for update using (true);
 
 -- Profiles
 drop policy if exists "profiles readable by all" on public.profiles;
@@ -98,25 +107,29 @@ create policy "users update own profile" on public.profiles for update using (au
 drop policy if exists "complaints readable by all" on public.complaints;
 create policy "complaints readable by all" on public.complaints for select using (true);
 drop policy if exists "auth users can insert complaints" on public.complaints;
-create policy "auth users can insert complaints" on public.complaints for insert with check (auth.role() = 'authenticated');
+drop policy if exists "app can insert complaints" on public.complaints;
+create policy "app can insert complaints" on public.complaints for insert with check (true);
 drop policy if exists "owners can edit own open complaints" on public.complaints;
-create policy "owners can edit own open complaints" on public.complaints for update using (auth.uid() = user_id);
 drop policy if exists "any authed can update status" on public.complaints;
-create policy "any authed can update status" on public.complaints for update using (auth.role() = 'authenticated');
+drop policy if exists "app can update complaints" on public.complaints;
+create policy "app can update complaints" on public.complaints for update using (true);
 
 -- Comments
 drop policy if exists "comments readable by all" on public.comments;
 create policy "comments readable by all" on public.comments for select using (true);
 drop policy if exists "auth users can comment" on public.comments;
-create policy "auth users can comment" on public.comments for insert with check (auth.role() = 'authenticated');
+drop policy if exists "app can comment" on public.comments;
+create policy "app can comment" on public.comments for insert with check (true);
 
 -- Upvotes
 drop policy if exists "upvotes readable by all" on public.upvotes;
 create policy "upvotes readable by all" on public.upvotes for select using (true);
 drop policy if exists "auth users can upvote" on public.upvotes;
-create policy "auth users can upvote" on public.upvotes for insert with check (auth.role() = 'authenticated');
+drop policy if exists "app can upvote" on public.upvotes;
+create policy "app can upvote" on public.upvotes for insert with check (true);
 drop policy if exists "users can remove own upvote" on public.upvotes;
-create policy "users can remove own upvote" on public.upvotes for delete using (auth.uid() = user_id);
+drop policy if exists "app can remove upvote" on public.upvotes;
+create policy "app can remove upvote" on public.upvotes for delete using (true);
 
 -- Warden invites: readable by all (needed to validate warden signup), writable by authed
 drop policy if exists "invites readable by all" on public.warden_invites;
@@ -154,7 +167,8 @@ on conflict (id) do nothing;
 drop policy if exists "public read images" on storage.objects;
 create policy "public read images" on storage.objects for select using (bucket_id = 'complaint-images');
 drop policy if exists "auth upload images" on storage.objects;
-create policy "auth upload images" on storage.objects for insert with check (bucket_id = 'complaint-images' and auth.role() = 'authenticated');
+drop policy if exists "app upload images" on storage.objects;
+create policy "app upload images" on storage.objects for insert with check (bucket_id = 'complaint-images');
 
 -- 9) ROSTER (private multi-tenant access — v3)
 -- Single source of truth: one row per person, email UNIQUE GLOBALLY (one email = one campus).
@@ -174,9 +188,11 @@ alter table public.members enable row level security;
 drop policy if exists "members readable by all" on public.members;
 create policy "members readable by all" on public.members for select using (true);
 drop policy if exists "authed manage members" on public.members;
-create policy "authed manage members" on public.members for insert with check (true);
+drop policy if exists "app manage members" on public.members;
+create policy "app manage members" on public.members for insert with check (true);
 drop policy if exists "authed delete members" on public.members;
-create policy "authed delete members" on public.members for delete using (true);
+drop policy if exists "app delete members" on public.members;
+create policy "app delete members" on public.members for delete using (true);
 
 -- 9b) CAMPUS APPROVAL WORKFLOW (v4) — run in the same SQL Editor
 -- New campuses start as 'pending'. App team approves/declines from /team.
@@ -215,7 +231,8 @@ alter table public.notifications enable row level security;
 drop policy if exists "notifications readable by all" on public.notifications;
 create policy "notifications readable by all" on public.notifications for select using (true);
 drop policy if exists "anyone can log notifications" on public.notifications;
-create policy "anyone can log notifications" on public.notifications for insert with check (true);
+drop policy if exists "app can log notifications" on public.notifications;
+create policy "app can log notifications" on public.notifications for insert with check (true);
 -- 10) Realtime: enable publication so UI updates live (run once; ignore error if already added)
 -- alter publication supabase_realtime add table public.complaints;
 -- alter publication supabase_realtime add table public.comments;

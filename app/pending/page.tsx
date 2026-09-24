@@ -9,11 +9,25 @@ import type { Campus } from "@/lib/types";
 export default function PendingPage() {
   const { user, loading: authLoading, logout } = useAuth();
   const [campus, setCampus] = useState<Campus | null>(null);
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     if (!authLoading && user?.campus_id) {
-      fetchCampusById(user.campus_id).then(setCampus);
-      return subscribeCampusUpdates(() => fetchCampusById(user.campus_id).then(setCampus));
+      const cid = user.campus_id;
+      fetchCampusById(cid)
+        .then((c) => {
+          setCampus(c);
+          setLoadError("");
+        })
+        .catch((e: any) => setLoadError(e?.message || "Could not load status."));
+      return subscribeCampusUpdates(() =>
+        fetchCampusById(cid)
+          .then((c) => {
+            setCampus(c);
+            setLoadError("");
+          })
+          .catch(() => {})
+      );
     }
   }, [authLoading, user?.campus_id]);
 
@@ -26,6 +40,20 @@ export default function PendingPage() {
   }
 
   const status = campus?.status || "pending";
+
+  if (loadError && !campus) {
+    return (
+      <div className="mx-auto w-full max-w-lg">
+        <div className="rounded-3xl border border-red-200 bg-red-50 p-6 text-center text-sm">
+          <p className="font-bold text-red-800">Can&apos;t reach the live database</p>
+          <p className="mt-1 text-red-700">{loadError}</p>
+          <p className="mt-2 text-red-700">
+            Status: <Link href="/api/health" className="font-bold underline">/api/health</Link>
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto w-full max-w-lg">

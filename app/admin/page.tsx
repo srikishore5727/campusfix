@@ -10,6 +10,7 @@ import {
   fetchCampusById,
   fetchComplaints,
   fetchMembers,
+  parseRosterCsv,
   removeMember,
   subscribeCampusUpdates,
   updateStatus,
@@ -32,6 +33,7 @@ export default function AdminPage() {
   const [search, setSearch] = useState("");
   const [campus, setCampus] = useState<Campus | null>(null);
   const [dbError, setDbError] = useState("");
+  const [actionError, setActionError] = useState("");
 
   const load = useCallback(async () => {
     if (!user) {
@@ -84,8 +86,16 @@ export default function AdminPage() {
   }, [members, search]);
 
   async function setStatus(id: string, s: Status) {
+    const prev = items.find((x) => x.id === id)?.status;
+    if (prev === s) return;
+    setActionError("");
     setItems((p) => p.map((x) => (x.id === id ? { ...x, status: s } : x)));
-    await updateStatus(id, s);
+    try {
+      await updateStatus(id, s);
+    } catch (e: any) {
+      if (prev) setItems((p) => p.map((x) => (x.id === id ? { ...x, status: prev } : x)));
+      setActionError(e?.message || "Status update failed.");
+    }
   }
 
   async function addSingle() {
@@ -106,6 +116,7 @@ export default function AdminPage() {
 
   async function runBulk() {
     setCsvResult("");
+    setActionError("");
     if (!user) return;
     if (!csv.trim()) {
       setCsvResult("Paste CSV rows first. Format per line: Name, Email, Role");
@@ -113,12 +124,18 @@ export default function AdminPage() {
     }
     setMBusy(true);
     try {
-      const r = await bulkAddMembers(user.campus_id, csv, user.id);
+      const total = parseRosterCsv(csv).length;
+      setCsvResult(`Uploading 0/${total}…`);
+      const r = await bulkAddMembers(user.campus_id, csv, user.id, (done, n) => {
+        setCsvResult(`Uploading ${done}/${n}…`);
+      });
       setCsv("");
       await load();
       setCsvResult(
         `Added ${r.added}.${r.skipped.length ? ` Skipped ${r.skipped.length}: ` + r.skipped.slice(0, 5).map((s) => `line ${s.line} (${s.reason})`).join("; ") + (r.skipped.length > 5 ? "…" : "") : ""}`
       );
+    } catch (e: any) {
+      setActionError(e?.message || "Bulk upload failed.");
     } finally {
       setMBusy(false);
     }
@@ -132,9 +149,19 @@ export default function AdminPage() {
 
   async function removeM(id: string) {
     if (!user) return;
+    const target = members.find((m) => m.id === id);
+    if (target?.role === "campus_admin" && members.filter((m) => m.role === "campus_admin").length <= 1) {
+      setActionError("Cannot remove the last campus admin — promote someone first.");
+      return;
+    }
     if (!confirm("Remove this person? They will no longer be able to login.")) return;
-    await removeMember(user.campus_id, id);
-    setMembers((p) => p.filter((m) => m.id !== id));
+    setActionError("");
+    try {
+      await removeMember(user.campus_id, id);
+      setMembers((p) => p.filter((m) => m.id !== id));
+    } catch (e: any) {
+      setActionError(e?.message || "Remove failed.");
+    }
   }
 
   if (!authLoading && !user)
@@ -199,6 +226,12 @@ export default function AdminPage() {
           )
         )}
       </div>
+
+      {actionError && (
+        <p className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">
+          {actionError}
+        </p>
+      )}
 
       {user?.role === "campus_admin" && (
         <section className="rounded-3xl border bg-white p-4 sm:p-5">
@@ -297,8 +330,7 @@ export default function AdminPage() {
 
       {loading ? (
         <p className="text-sm text-zinc-500">Loading campus issues…</p>
-      ) : dbError ? (
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm">
+      ) : dbError ? (        <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm">
           <p className="font-bold text-red-800">Can&apos;t reach the live database</p>
           <p className="mt-1 text-red-700">{dbError}</p>
           <p className="mt-2 text-red-700">

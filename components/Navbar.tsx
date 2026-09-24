@@ -3,7 +3,35 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
+
+function ModeBadge() {
+  const [mode, setMode] = useState<"live" | "local" | "local-fallback" | null>(null);
+  useEffect(() => {
+    fetch("/api/health")
+      .then((r) => r.json())
+      .then((j) => setMode(j.mode || "local"))
+      .catch(() => setMode("local"));
+  }, []);
+  if (!mode) return null;
+  const live = mode === "live";
+  return (
+    <span
+      title={
+        live
+          ? "Connected to Supabase — data syncs live across devices"
+          : "Local demo data only — run supabase/schema.sql to go live (see /api/health)"
+      }
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+        live ? "border-green-300 bg-green-50 text-green-700" : "border-amber-300 bg-amber-50 text-amber-700"
+      }`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${live ? "bg-green-500" : "bg-amber-500"}`} />
+      {live ? "Live" : "Local"}
+    </span>
+  );
+}
 
 export default function Navbar() {
   const path = usePathname();
@@ -41,6 +69,7 @@ export default function Navbar() {
               {user.campus_name}
             </span>
           )}
+          <ModeBadge />
         </Link>
 
         {user && user.role === "super_admin" && (

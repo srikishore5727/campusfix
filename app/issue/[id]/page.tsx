@@ -23,22 +23,29 @@ export default function IssuePage({ params }: { params: Promise<{ id: string }> 
   const [body, setBody] = useState("");
   const [loading, setLoading] = useState(true);
   const [denied, setDenied] = useState(false);
+  const [dbError, setDbError] = useState("");
 
   const load = useCallback(async () => {
-    const c = await fetchComplaintById(id);
-    if (!c) {
+    try {
+      const c = await fetchComplaintById(id);
+      if (!c) {
+        setLoading(false);
+        return;
+      }
+      // Campus isolation: users can only view their own campus issues
+      if (user && c.campus_id !== user.campus_id) {
+        setDenied(true);
+        setLoading(false);
+        return;
+      }
+      setItem(c);
+      setComments(await fetchComments(id));
+      setDbError("");
+    } catch (e: any) {
+      setDbError(e?.message || "Could not load this issue.");
+    } finally {
       setLoading(false);
-      return;
     }
-    // Campus isolation: users can only view their own campus issues
-    if (user && c.campus_id !== user.campus_id) {
-      setDenied(true);
-      setLoading(false);
-      return;
-    }
-    setItem(c);
-    setComments(await fetchComments(id));
-    setLoading(false);
   }, [id, user?.campus_id]);
 
   useEffect(() => {
@@ -85,7 +92,18 @@ export default function IssuePage({ params }: { params: Promise<{ id: string }> 
   if (!item)
     return (
       <div className="rounded-2xl border bg-white p-8 text-center text-sm">
-        Issue not found. <Link href="/" className="font-bold underline">Back to feed</Link>
+        {dbError ? (
+          <>
+            <p className="font-bold text-red-700">Can&apos;t reach the live database</p>
+            <p className="mt-1 text-zinc-600">{dbError}</p>
+            <p className="mt-2 text-zinc-600">
+              Run <code>supabase/schema.sql</code>, then retry. Status:{" "}
+              <Link href="/api/health" className="font-bold underline">/api/health</Link>
+            </p>
+          </>
+        ) : (
+          <>Issue not found. <Link href="/" className="font-bold underline">Back to feed</Link></>
+        )}
       </div>
     );
 

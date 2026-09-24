@@ -43,6 +43,7 @@ export function notifyLocal() {
 }
 
 export function ensureSeed() {
+  if (isCloudMode()) return; // cloud mode: Supabase only, never local demo data
   if (typeof window === "undefined") return;
   let campuses = readLocal<Campus[] | null>(CAMPUS_KEY, null);
   if (!campuses) {
@@ -89,6 +90,22 @@ function sb() {
   return getSupabaseBrowser();
 }
 
+// Cloud mode = Supabase env vars present. In cloud mode Supabase is the ONLY
+// source of truth: no seeding, no local fallback. Cloud errors are logged and
+// surfaced (never silently hidden behind local demo data).
+export function isCloudMode() {
+  return Boolean(
+    process.env.NEXT_PUBLIC_SUPABASE_URL &&
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  );
+}
+
+function cloudError(where: string, err: unknown) {
+  try {
+    console.error(`[CampusFix:cloud] ${where}:`, (err as any)?.message || err);
+  } catch {}
+}
+
 export function slugify(name: string) {
   return (
     name
@@ -112,13 +129,15 @@ export async function fetchCampuses(): Promise<Campus[]> {
 export async function fetchAllCampuses(): Promise<Campus[]> {
   const client = sb();
   if (client) {
-    try {
-      const { data, error } = await client
-        .from("campuses")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (!error && data && data.length > 0) return data as Campus[];
-    } catch {}
+    const { data, error } = await client
+      .from("campuses")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) {
+      cloudError("fetchAllCampuses", error);
+      throw new Error(`Database error: ${error.message}`);
+    }
+    return (data || []) as Campus[];
   }
   ensureSeed();
   return [...readLocal<Campus[]>(CAMPUS_KEY, [])].sort(
@@ -130,10 +149,12 @@ export async function fetchCampusById(id: string): Promise<Campus | null> {
   if (!id) return null;
   const client = sb();
   if (client) {
-    try {
-      const { data } = await client.from("campuses").select("*").eq("id", id).single();
-      if (data) return data as Campus;
-    } catch {}
+    const { data, error } = await client.from("campuses").select("*").eq("id", id).single();
+    if (error && (error as any)?.code !== "PGRST116") {
+      cloudError("fetchCampusById", error);
+      throw new Error(`Database error: ${error.message}`);
+    }
+    return (data as Campus) || null;
   }
   ensureSeed();
   return readLocal<Campus[]>(CAMPUS_KEY, []).find((c) => c.id === id) || null;
@@ -176,24 +197,24 @@ export async function createCampus(
   const contactEmail = normalizeEmail(contact?.email || "");
   const client = sb();
   if (client) {
-    try {
-      const { data, error } = await client
-        .from("campuses")
-        .insert({
-          name: clean,
-          slug: `${slugify(clean)}-${Date.now().toString(36)}`,
-          created_by: createdBy || null,
-          status: "pending",
-          contact_name: contactName || null,
-          contact_email: contactEmail || null,
-        })
-        .select()
-        .single();
-      if (!error && data) {
-        notifyLocal();
-        return data as Campus;
-      }
-    } catch {}
+    const { data, error } = await client
+      .from("campuses")
+      .insert({
+        name: clean,
+        slug: `${slugify(clean)}-${Date.now().toString(36)}`,
+        created_by: createdBy || null,
+        status: "pending",
+        contact_name: contactName || null,
+        contact_email: contactEmail || null,
+      })
+      .select()
+      .single();
+    if (error) {
+      cloudError("createCampus", error);
+      throw new Error(`Database error: ${error.message}`);
+    }
+    notifyLocal();
+    return data as Campus;
   }
   const c: Campus = {
     id: uid("campus"),
@@ -229,27 +250,30 @@ export async function reviewCampus(
   if (!camp) throw new Error("Campus not found.");
 
   if (client) {
-    try {
-      await client
-        .from("campuses")
-        .update({
-          status: decision,
-          reject_reason: decision === "rejected" ? cleanReason : null,
-          reviewed_at: nowIso,
-          reviewed_by: reviewer,
-        })
-        .eq("id", campusId);
-    } catch {}
+    const { error } = await client
+      .from("campuses")
+      .update({
+        status: decision,
+        reject_reason: decision === "rejected" ? cleanReason : null,
+        reviewed_at: nowIso,
+        reviewed_by: reviewer,
+      })
+      .eq("id", campusId);
+    if (error) {
+      cloudError("reviewCampus/update", error);
+      throw new Error(`Database error: ${error.message}`);
+    }
+  } else {
+    const all = withApprovedSeed(readLocal<Campus[]>(CAMPUS_KEY, []));
+    writeLocal(
+      CAMPUS_KEY,
+      all.map((c) =>
+        c.id === campusId
+          ? { ...c, status: decision, reject_reason: decision === "rejected" ? cleanReason : null, reviewed_at: nowIso, reviewed_by: reviewer }
+          : c
+      )
+    );
   }
-  const all = withApprovedSeed(readLocal<Campus[]>(CAMPUS_KEY, []));
-  writeLocal(
-    CAMPUS_KEY,
-    all.map((c) =>
-      c.id === campusId
-        ? { ...c, status: decision, reject_reason: decision === "rejected" ? cleanReason : null, reviewed_at: nowIso, reviewed_by: reviewer }
-        : c
-    )
-  );
 
   const subject =
     decision === "approved"
@@ -275,30 +299,31 @@ export async function reviewCampus(
   };
 
   if (client) {
-    try {
-      const { data } = await client
-        .from("notifications")
-        .insert({
-          campus_id: note.campus_id,
-          campus_name: note.campus_name,
-          to_email: note.to_email,
-          to_name: note.to_name,
-          kind: note.kind,
-          subject: note.subject,
-          body: note.body,
-          reason: note.reason,
-        })
-        .select()
-        .single();
-      if (data) {
-        note.id = (data as any).id || note.id;
-        note.sent = true;
-      }
-    } catch {}
+    const { data, error } = await client
+      .from("notifications")
+      .insert({
+        campus_id: note.campus_id,
+        campus_name: note.campus_name,
+        to_email: note.to_email,
+        to_name: note.to_name,
+        kind: note.kind,
+        subject: note.subject,
+        body: note.body,
+        reason: note.reason,
+      })
+      .select()
+      .single();
+    if (error) {
+      cloudError("reviewCampus/notify-log", error);
+    } else if (data) {
+      note.id = (data as any).id || note.id;
+      note.sent = true;
+    }
+  } else {
+    const mails = readLocal<CampusNotification[]>(MAIL_KEY, []);
+    mails.unshift({ ...note, sent: note.sent });
+    writeLocal(MAIL_KEY, mails);
   }
-  const mails = readLocal<CampusNotification[]>(MAIL_KEY, []);
-  mails.unshift({ ...note, sent: note.sent });
-  writeLocal(MAIL_KEY, mails);
 
   // fire-and-forget real email (Resend when configured, else simulated log)
   try {
@@ -324,14 +349,16 @@ const MAIL_KEY = "campusfix_mail_v4";
 export async function fetchMailLog(): Promise<CampusNotification[]> {
   const client = sb();
   if (client) {
-    try {
-      const { data, error } = await client
-        .from("notifications")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(100);
-      if (!error && data) return data as CampusNotification[];
-    } catch {}
+    const { data, error } = await client
+      .from("notifications")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (error) {
+      cloudError("fetchMailLog", error);
+      return [];
+    }
+    return (data || []) as CampusNotification[];
   }
   return readLocal<CampusNotification[]>(MAIL_KEY, []);
 }
@@ -426,18 +453,18 @@ export async function fetchComplaints(campusId: string): Promise<Complaint[]> {
   if (!campusId) return [];
   const client = sb();
   if (client) {
-    try {
-      const { data, error } = await client
-        .from("complaints")
-        .select("*")
-        .eq("campus_id", campusId)
-        .order("created_at", { ascending: false })
-        .limit(200);
-      if (!error && data) {
-        // merge local upvoted_by? Supabase mode uses upvotes table; keep field for UI compat
-        return (data as any[]).map((d) => ({ ...d, upvoted_by: d.upvoted_by || [] })) as Complaint[];
-      }
-    } catch {}
+    const { data, error } = await client
+      .from("complaints")
+      .select("*")
+      .eq("campus_id", campusId)
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error) {
+      cloudError("fetchComplaints", error);
+      throw new Error(`Database error: ${error.message}`);
+    }
+    // Supabase mode uses upvotes table; keep field for UI compat
+    return ((data || []) as any[]).map((d) => ({ ...d, upvoted_by: d.upvoted_by || [] })) as Complaint[];
   }
   ensureSeed();
   const local = readLocal<Complaint[]>(C_KEY, []);
@@ -449,10 +476,12 @@ export async function fetchComplaints(campusId: string): Promise<Complaint[]> {
 export async function fetchComplaintById(id: string): Promise<Complaint | null> {
   const client = sb();
   if (client) {
-    try {
-      const { data } = await client.from("complaints").select("*").eq("id", id).single();
-      if (data) return data as Complaint;
-    } catch {}
+    const { data, error } = await client.from("complaints").select("*").eq("id", id).single();
+    if (error && (error as any)?.code !== "PGRST116") {
+      cloudError("fetchComplaintById", error);
+      throw new Error(`Database error: ${error.message}`);
+    }
+    return (data as Complaint) || null;
   }
   ensureSeed();
   return readLocal<Complaint[]>(C_KEY, []).find((c) => c.id === id) || null;
@@ -470,17 +499,17 @@ export async function createComplaint(input: {
 }): Promise<Complaint> {
   const client = sb();
   if (client) {
-    try {
-      const { data, error } = await client
-        .from("complaints")
-        .insert({ ...input, status: "open" })
-        .select()
-        .single();
-      if (!error && data) {
-        notifyLocal();
-        return { ...(data as Complaint), upvoted_by: [] };
-      }
-    } catch {}
+    const { data, error } = await client
+      .from("complaints")
+      .insert({ ...input, status: "open" })
+      .select()
+      .single();
+    if (error) {
+      cloudError("createComplaint", error);
+      throw new Error(`Database error: ${error.message}`);
+    }
+    notifyLocal();
+    return { ...(data as Complaint), upvoted_by: [] };
   }
   const c: Complaint = {
     id: uid("c"),
@@ -500,24 +529,36 @@ export async function createComplaint(input: {
 export async function toggleUpvote(complaint: Complaint, userId: string): Promise<Complaint> {
   const client = sb();
   if (client) {
-    try {
-      const { data: existing } = await client
-        .from("upvotes")
-        .select("*")
-        .eq("complaint_id", complaint.id)
-        .eq("user_id", userId)
-        .maybeSingle();
-      if (existing) {
-        await client.from("upvotes").delete().eq("complaint_id", complaint.id).eq("user_id", userId);
-      } else {
-        await client.from("upvotes").insert({ complaint_id: complaint.id, user_id: userId });
+    const { data: existing, error: readErr } = await client
+      .from("upvotes")
+      .select("*")
+      .eq("complaint_id", complaint.id)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (readErr) {
+      cloudError("toggleUpvote/read", readErr);
+      throw new Error(`Database error: ${readErr.message}`);
+    }
+    if (existing) {
+      const { error } = await client.from("upvotes").delete().eq("complaint_id", complaint.id).eq("user_id", userId);
+      if (error) {
+        cloudError("toggleUpvote/delete", error);
+        throw new Error(`Database error: ${error.message}`);
       }
-      const { data } = await client.from("complaints").select("*").eq("id", complaint.id).single();
-      if (data) {
-        notifyLocal();
-        return { ...(data as Complaint), upvoted_by: complaint.upvoted_by };
+    } else {
+      const { error } = await client.from("upvotes").insert({ complaint_id: complaint.id, user_id: userId });
+      if (error) {
+        cloudError("toggleUpvote/insert", error);
+        throw new Error(`Database error: ${error.message}`);
       }
-    } catch {}
+    }
+    const { data, error } = await client.from("complaints").select("*").eq("id", complaint.id).single();
+    if (error) {
+      cloudError("toggleUpvote/refetch", error);
+      throw new Error(`Database error: ${error.message}`);
+    }
+    notifyLocal();
+    return { ...(data as Complaint), upvoted_by: complaint.upvoted_by };
   }
   const all = readLocal<Complaint[]>(C_KEY, []);
   const idx = all.findIndex((c) => c.id === complaint.id);
@@ -535,9 +576,13 @@ export async function toggleUpvote(complaint: Complaint, userId: string): Promis
 export async function updateStatus(complaintId: string, status: Status): Promise<void> {
   const client = sb();
   if (client) {
-    try {
-      await client.from("complaints").update({ status }).eq("id", complaintId);
-    } catch {}
+    const { error } = await client.from("complaints").update({ status }).eq("id", complaintId);
+    if (error) {
+      cloudError("updateStatus", error);
+      throw new Error(`Database error: ${error.message}`);
+    }
+    notifyLocal();
+    return;
   }
   const all = readLocal<Complaint[]>(C_KEY, []);
   const idx = all.findIndex((c) => c.id === complaintId);
@@ -553,14 +598,16 @@ export async function updateStatus(complaintId: string, status: Status): Promise
 export async function fetchComments(complaintId: string): Promise<Comment[]> {
   const client = sb();
   if (client) {
-    try {
-      const { data, error } = await client
-        .from("comments")
-        .select("*")
-        .eq("complaint_id", complaintId)
-        .order("created_at", { ascending: true });
-      if (!error && data) return data as Comment[];
-    } catch {}
+    const { data, error } = await client
+      .from("comments")
+      .select("*")
+      .eq("complaint_id", complaintId)
+      .order("created_at", { ascending: true });
+    if (error) {
+      cloudError("fetchComments", error);
+      throw new Error(`Database error: ${error.message}`);
+    }
+    return (data || []) as Comment[];
   }
   return readLocal<Comment[]>(M_KEY, [])
     .filter((c) => c.complaint_id === complaintId)
@@ -576,13 +623,13 @@ export async function addComment(input: {
 }): Promise<Comment> {
   const client = sb();
   if (client) {
-    try {
-      const { data, error } = await client.from("comments").insert(input).select().single();
-      if (!error && data) {
-        notifyLocal();
-        return data as Comment;
-      }
-    } catch {}
+    const { data, error } = await client.from("comments").insert(input).select().single();
+    if (error) {
+      cloudError("addComment", error);
+      throw new Error(`Database error: ${error.message}`);
+    }
+    notifyLocal();
+    return data as Comment;
   }
   const c: Comment = { id: uid("m"), created_at: new Date().toISOString(), ...input };
   const all = readLocal<Comment[]>(M_KEY, []);
@@ -595,6 +642,7 @@ export async function addComment(input: {
 export async function uploadImage(file: File): Promise<string | null> {
   const client = sb();
   if (!client) {
+    // local demo only: inline preview
     return await new Promise((resolve) => {
       const r = new FileReader();
       r.onload = () => resolve(r.result as string);
@@ -602,16 +650,15 @@ export async function uploadImage(file: File): Promise<string | null> {
       r.readAsDataURL(file);
     });
   }
-  try {
-    const ext = file.name.split(".").pop() || "jpg";
-    const path = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-    const { error } = await client.storage.from("complaint-images").upload(path, file, { upsert: false });
-    if (error) return null;
-    const { data } = client.storage.from("complaint-images").getPublicUrl(path);
-    return data.publicUrl;
-  } catch {
-    return null;
+  const ext = file.name.split(".").pop() || "jpg";
+  const path = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+  const { error } = await client.storage.from("complaint-images").upload(path, file, { upsert: false });
+  if (error) {
+    cloudError("uploadImage", error);
+    throw new Error(`Image upload failed: ${error.message} (is the 'complaint-images' bucket created?)`);
   }
+  const { data } = client.storage.from("complaint-images").getPublicUrl(path);
+  return data.publicUrl;
 }
 
 // ---------------- ROSTER (private access — v3) ----------------
@@ -639,20 +686,15 @@ export async function findMemberByEmail(email: string): Promise<(Member & { camp
   const em = normalizeEmail(email);
   const client = sb();
   if (client) {
-    try {
-      const { data } = await client.from("members").select("*, campuses(name)").eq("email", em).limit(1);
-      // NOTE: postgrest lower() index; fallback to ilike if exact misses
-      let row: any = (data as any[])?.[0];
-      if (!row) {
-        const { data: d2 } = await client.from("members").select("*").ilike("email", em).limit(1);
-        row = (d2 as any[])?.[0];
-      }
-      if (row) {
-        const campuses = await fetchCampuses().catch(() => [] as Campus[]);
-        const camp = campuses.find((c) => c.id === row.campus_id);
-        return { ...row, campus_name: camp?.name || row.campus_name || "My Campus" };
-      }
-    } catch {}
+    const { data, error } = await client.from("members").select("*").ilike("email", em).limit(1);
+    if (error) {
+      cloudError("findMemberByEmail", error);
+      throw new Error(`Database error: ${error.message}`);
+    }
+    const row: any = (data as any[])?.[0];
+    if (!row) return null;
+    const { data: camp } = await client.from("campuses").select("id,name").eq("id", row.campus_id).single();
+    return { ...row, campus_name: (camp as any)?.name || "My Campus" };
   }
   ensureSeed();
   const campuses = readLocal<Campus[]>(CAMPUS_KEY, []);
@@ -667,15 +709,17 @@ export async function findMemberByEmail(email: string): Promise<(Member & { camp
 export async function fetchMembers(campusId: string): Promise<Member[]> {
   const client = sb();
   if (client) {
-    try {
-      const { data, error } = await client
-        .from("members")
-        .select("*")
-        .eq("campus_id", campusId)
-        .order("created_at", { ascending: false })
-        .limit(2000);
-      if (!error && data) return data as Member[];
-    } catch {}
+    const { data, error } = await client
+      .from("members")
+      .select("*")
+      .eq("campus_id", campusId)
+      .order("created_at", { ascending: false })
+      .limit(2000);
+    if (error) {
+      cloudError("fetchMembers", error);
+      throw new Error(`Database error: ${error.message}`);
+    }
+    return (data || []) as Member[];
   }
   ensureSeed();
   return readLocal<Member[]>(MEMBERS_KEY, []).filter((m) => m.campus_id === campusId);
@@ -702,17 +746,21 @@ export async function addMember(
 
   const client = sb();
   if (client) {
-    try {
-      const { data, error } = await client
-        .from("members")
-        .insert({ campus_id: campusId, name: cleanName, email: cleanEmail, role })
-        .select()
-        .single();
-      if (!error && data) {
-        notifyLocal();
-        return data as Member;
-      }
-    } catch {}
+    const { data, error } = await client
+      .from("members")
+      .insert({ campus_id: campusId, name: cleanName, email: cleanEmail, role })
+      .select()
+      .single();
+    if (error) {
+      cloudError("addMember", error);
+      throw new Error(
+        error.message.includes("duplicate") || (error as any)?.code === "23505"
+          ? "This email is already registered (emails are unique across all campuses)."
+          : `Database error: ${error.message}`
+      );
+    }
+    notifyLocal();
+    return data as Member;
   }
   const campuses = readLocal<Campus[]>(CAMPUS_KEY, []);
   seedMembersIfEmpty(campuses);
@@ -769,9 +817,13 @@ export async function bulkAddMembers(
 export async function removeMember(campusId: string, memberId: string): Promise<void> {
   const client = sb();
   if (client) {
-    try {
-      await client.from("members").delete().eq("id", memberId).eq("campus_id", campusId);
-    } catch {}
+    const { error } = await client.from("members").delete().eq("id", memberId).eq("campus_id", campusId);
+    if (error) {
+      cloudError("removeMember", error);
+      throw new Error(`Database error: ${error.message}`);
+    }
+    notifyLocal();
+    return;
   }
   const all = readLocal<Member[]>(MEMBERS_KEY, []);
   writeLocal(MEMBERS_KEY, all.filter((m) => !(m.id === memberId && m.campus_id === campusId)));

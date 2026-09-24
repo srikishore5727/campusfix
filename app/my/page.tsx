@@ -17,9 +17,14 @@ export default function MyPage() {
       setLoading(false);
       return;
     }
-    const all = await fetchComplaints(user.campus_id);
-    setItems(all.filter((c) => c.user_id === user.id));
-    setLoading(false);
+    try {
+      const all = await fetchComplaints(user.campus_id);
+      setItems(all.filter((c) => c.user_id === user.id));
+    } catch (e: any) {
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
   }, [user?.id, user?.campus_id]);
 
   useEffect(() => {

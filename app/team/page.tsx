@@ -29,10 +29,16 @@ export default function TeamPage() {
   const isTeam = user?.role === "super_admin";
 
   const load = useCallback(async () => {
-    const [c, m] = await Promise.all([fetchAllCampuses(), fetchMailLog()]);
-    setCampuses(c);
-    setMails(m);
-    setLoading(false);
+    try {
+      const [c, m] = await Promise.all([fetchAllCampuses(), fetchMailLog()]);
+      setCampuses(c);
+      setMails(m);
+      setMsg("");
+    } catch (e: any) {
+      setMsg(e?.message || "Could not load. Is supabase/schema.sql run? Check /api/health.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

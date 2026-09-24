@@ -46,7 +46,14 @@ export default function NewPage() {
     }
     setBusy(true);
     try {
-      const image_url = file ? await uploadImage(file) : null;
+      let image_url: string | null = null;
+      if (file) {
+        try {
+          image_url = await uploadImage(file);
+        } catch (e: any) {
+          setErr(e?.message || "Image upload failed — submitting without photo.");
+        }
+      }
       const c = await createComplaint({
         campus_id: user.campus_id,
         user_id: user.id,

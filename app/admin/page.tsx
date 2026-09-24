@@ -31,21 +31,28 @@ export default function AdminPage() {
   const [csvResult, setCsvResult] = useState("");
   const [search, setSearch] = useState("");
   const [campus, setCampus] = useState<Campus | null>(null);
+  const [dbError, setDbError] = useState("");
 
   const load = useCallback(async () => {
     if (!user) {
       setLoading(false);
       return;
     }
-    const [c, m, camp] = await Promise.all([
-      fetchComplaints(user.campus_id),
-      user.role === "campus_admin" ? fetchMembers(user.campus_id) : Promise.resolve([] as Member[]),
-      fetchCampusById(user.campus_id),
-    ]);
-    setItems(c);
-    setMembers(m);
-    setCampus(camp);
-    setLoading(false);
+    try {
+      const [c, m, camp] = await Promise.all([
+        fetchComplaints(user.campus_id),
+        user.role === "campus_admin" ? fetchMembers(user.campus_id) : Promise.resolve([] as Member[]),
+        fetchCampusById(user.campus_id),
+      ]);
+      setItems(c);
+      setMembers(m);
+      setCampus(camp);
+      setDbError("");
+    } catch (e: any) {
+      setDbError(e?.message || "Could not load dashboard data.");
+    } finally {
+      setLoading(false);
+    }
   }, [user?.campus_id, user?.role]);
 
   useEffect(() => {
@@ -290,6 +297,24 @@ export default function AdminPage() {
 
       {loading ? (
         <p className="text-sm text-zinc-500">Loading campus issues…</p>
+      ) : dbError ? (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm">
+          <p className="font-bold text-red-800">Can&apos;t reach the live database</p>
+          <p className="mt-1 text-red-700">{dbError}</p>
+          <p className="mt-2 text-red-700">
+            Run <code>supabase/schema.sql</code> in Supabase SQL Editor, then retry.
+            Status: <a href="/api/health" className="font-bold underline">/api/health</a>
+          </p>
+          <button
+            onClick={() => {
+              setLoading(true);
+              load();
+            }}
+            className="mt-3 inline-flex min-h-[44px] items-center rounded-full bg-red-700 px-5 py-2.5 text-sm font-bold text-white"
+          >
+            Retry
+          </button>
+        </div>
       ) : (
         <div className="space-y-2.5">
           {[...items]

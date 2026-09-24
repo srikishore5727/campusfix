@@ -25,6 +25,7 @@ export default function Home() {
   const [sort, setSort] = useState<"top" | "new">("top");
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const [campus, setCampus] = useState<Campus | null>(null);
+  const [dbError, setDbError] = useState("");
 
   const campusId = user?.campus_id || "";
 
@@ -34,14 +35,20 @@ export default function Home() {
       return;
     }
     ensureSeed();
-    const [data, c] = await Promise.all([
-      fetchComplaints(campusId),
-      fetchCampusById(campusId),
-    ]);
-    setItems(data);
-    setCampus(c);
-    setLoading(false);
-    setLastSync(new Date());
+    try {
+      const [data, c] = await Promise.all([
+        fetchComplaints(campusId),
+        fetchCampusById(campusId),
+      ]);
+      setItems(data);
+      setCampus(c);
+      setDbError("");
+      setLoading(false);
+      setLastSync(new Date());
+    } catch (e: any) {
+      setDbError(e?.message || "Could not load campus data.");
+      setLoading(false);
+    }
   }, [campusId]);
 
   useEffect(() => {
@@ -239,6 +246,24 @@ export default function Home() {
       {loading ? (
         <div className="grid gap-3">
           <SkeletonCard /><SkeletonCard /><SkeletonCard />
+        </div>
+      ) : dbError ? (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm">
+          <p className="font-bold text-red-800">Can&apos;t reach the live database</p>
+          <p className="mt-1 text-red-700">{dbError}</p>
+          <p className="mt-2 text-red-700">
+            Fix: run <code>supabase/schema.sql</code> in Supabase SQL Editor, then refresh.
+            Check <a href="/api/health" className="font-bold underline">/api/health</a> for the exact status.
+          </p>
+          <button
+            onClick={() => {
+              setLoading(true);
+              load();
+            }}
+            className="mt-3 inline-flex min-h-[44px] items-center rounded-full bg-red-700 px-5 py-2.5 text-sm font-bold text-white"
+          >
+            Retry
+          </button>
         </div>
       ) : visible.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-zinc-300 bg-white p-8 text-center sm:p-10">

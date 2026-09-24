@@ -27,9 +27,13 @@ export default function LoginPage() {
       return;
     }
     // campus_admin: approved -> dashboard, else status page
-    fetchCampusById(user.campus_id).then((c) => {
-      router.push(c && c.status === "approved" ? "/admin" : "/pending");
-    });
+    fetchCampusById(user.campus_id)
+      .then((c) => {
+        router.push(c && c.status === "approved" ? "/admin" : "/pending");
+      })
+      .catch(() => {
+        router.push("/pending");
+      });
   }, [user, router]);
 
   const inputCls =

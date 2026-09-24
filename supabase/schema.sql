@@ -156,6 +156,28 @@ create policy "public read images" on storage.objects for select using (bucket_i
 drop policy if exists "auth upload images" on storage.objects;
 create policy "auth upload images" on storage.objects for insert with check (bucket_id = 'complaint-images' and auth.role() = 'authenticated');
 
--- 9) Realtime: enable publication so UI updates live (run once; ignore error if already added)
+-- 9) ROSTER (private multi-tenant access — v3)
+-- Single source of truth: one row per person, email UNIQUE GLOBALLY (one email = one campus).
+-- Login checks name+email against this table; no public signup, no campus picker.
+create table if not exists public.members (
+  id uuid primary key default gen_random_uuid(),
+  campus_id uuid not null references public.campuses(id) on delete cascade,
+  name text not null,
+  email text not null,
+  role text not null default 'student' check (role in ('student','warden','campus_admin')),
+  created_at timestamptz default now()
+);
+-- global email uniqueness (case-insensitive)
+create unique index if not exists members_email_unique on public.members (lower(email));
+
+alter table public.members enable row level security;
+drop policy if exists "members readable by all" on public.members;
+create policy "members readable by all" on public.members for select using (true);
+drop policy if exists "authed manage members" on public.members;
+create policy "authed manage members" on public.members for insert with check (true);
+drop policy if exists "authed delete members" on public.members;
+create policy "authed delete members" on public.members for delete using (true);
+
+-- 10) Realtime: enable publication so UI updates live (run once; ignore error if already added)
 -- alter publication supabase_realtime add table public.complaints;
 -- alter publication supabase_realtime add table public.comments;

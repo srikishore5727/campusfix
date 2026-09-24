@@ -123,16 +123,19 @@ export default function Home() {
               href="/login"
               className="flex min-h-[48px] items-center justify-center rounded-2xl bg-white px-6 py-3 text-sm font-bold text-zinc-900 transition hover:bg-zinc-200"
             >
-              Login / Sign up
+              Login with your campus ID
             </Link>
-            <span className="flex min-h-[48px] items-center justify-center rounded-2xl bg-white/10 px-6 py-3 text-sm font-semibold">
-              No demo accounts — real campus login
-            </span>
+            <Link
+              href="/login"
+              className="flex min-h-[48px] items-center justify-center rounded-2xl bg-white/10 px-6 py-3 text-sm font-semibold transition hover:bg-white/20"
+            >
+              Register a new campus
+            </Link>
           </div>
         </section>
         <div className="grid gap-3 sm:grid-cols-3">
           {[
-            ["1. Pick your campus", "Students, wardens and admins all join under their college."],
+            ["1. Admin adds you", "Your campus admin registers your name + email. No searching for campuses."],
             ["2. Report + upvote", "Photo proof + location. Others upvote to set priority."],
             ["3. Track to resolved", "Warden updates status live. Feed refreshes on every change."],
           ].map(([t, d]) => (

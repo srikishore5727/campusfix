@@ -6,10 +6,10 @@
 
 **Live:** _(paste Vercel URL)_ `https://campusfix.vercel.app`
 
-**Login (no demo accounts):**
-- Student tab → Sign up with name/email/password + pick campus → Login
-- Warden tab → only works if campus admin added your email first
-- Campus Setup tab → create new campus + admin account (e.g. your college)
+**Login (private roster — no public signup, no campus list):**
+- Campus admin adds you (Name + Email, single or CSV bulk) → you login with exact Name + Email → auto-lands in your campus
+- New college? Register campus → you become its admin → add members from Admin → Members
+- Test accounts (seeded locally, never shown in UI): `Campus Admin / admin@greenfield.edu`, `Ravi Warden / warden@greenfield.edu`, `Aarav Patel / aarav@greenfield.edu`
 
 ---
 

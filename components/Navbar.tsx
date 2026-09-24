@@ -1,9 +1,9 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
-import { canManageComplaints } from "@/lib/types";
 
 export default function Navbar() {
   const path = usePathname();
@@ -27,33 +27,56 @@ export default function Navbar() {
   return (
     <header className="sticky top-0 z-20 border-b border-zinc-200 bg-white/95 backdrop-blur">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-2 px-3 py-2.5 sm:px-4">
-        <Link href="/" className="flex min-w-0 items-center gap-2">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-zinc-900 text-lg font-bold text-white">
-            C
-          </span>
-          <span className="min-w-0 leading-tight">
-            <span className="block truncate text-[15px] font-bold">CampusFix</span>
-            <span className="block max-w-[180px] truncate text-[11px] text-zinc-500 sm:max-w-[260px]">
-              {user ? user.campus_name : "Multi-campus issue tracker"}
+        <Link href={user ? "/" : "/login"} className="flex min-w-0 items-center gap-2">
+          <Image
+            src="/campusfix-logo.png"
+            alt="CampusFix"
+            width={140}
+            height={32}
+            priority
+            className="h-7 w-auto sm:h-8"
+          />
+          {user && (
+            <span className="hidden max-w-[200px] truncate rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 sm:block">
+              {user.campus_name}
             </span>
-          </span>
+          )}
         </Link>
 
-        <nav className="hidden items-center gap-1 md:flex">
-          {link("/", "Feed")}
-          {user && link("/new", "Report")}
-          {user && link("/my", "My issues")}
-          {user && canManageComplaints(user.role) && link("/admin", "Dashboard")}
-        </nav>
+        {user && (
+          <nav className="hidden items-center gap-1 md:flex">
+            {user.role === "student" ? (
+              <>
+                {link("/", "My Campus")}
+                {link("/new", "Report")}
+                {link("/my", "My issues")}
+              </>
+            ) : (
+              <>
+                {link("/", "Feed")}
+                {link("/admin", "Dashboard")}
+                {link("/my", "My posts")}
+              </>
+            )}
+          </nav>
+        )}
 
         <div className="flex shrink-0 items-center gap-2">
           {!user ? (
-            <Link
-              href="/login"
-              className="flex min-h-[42px] items-center rounded-full bg-zinc-900 px-5 py-2 text-sm font-semibold text-white transition hover:bg-zinc-700"
-            >
-              Login
-            </Link>
+            <>
+              <Link
+                href="/login"
+                className="hidden min-h-[42px] items-center rounded-full px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 sm:flex"
+              >
+                Register campus
+              </Link>
+              <Link
+                href="/login"
+                className="flex min-h-[42px] items-center rounded-full bg-zinc-900 px-5 py-2 text-sm font-semibold text-white transition hover:bg-zinc-700"
+              >
+                Login
+              </Link>
+            </>
           ) : (
             <>
               <span className="hidden max-w-[180px] truncate text-right text-xs leading-tight text-zinc-600 lg:block">
@@ -75,12 +98,23 @@ export default function Navbar() {
           )}
         </div>
       </div>
-      <div className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-3 pb-2 md:hidden">
-        {link("/", "Feed")}
-        {user && link("/new", "Report")}
-        {user && link("/my", "My issues")}
-        {user && canManageComplaints(user.role) && link("/admin", "Dashboard")}
-      </div>
+      {user && (
+        <div className="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-3 pb-2 md:hidden">
+          {user.role === "student" ? (
+            <>
+              {link("/", "My Campus")}
+              {link("/new", "Report")}
+              {link("/my", "My issues")}
+            </>
+          ) : (
+            <>
+              {link("/", "Feed")}
+              {link("/admin", "Dashboard")}
+              {link("/my", "My posts")}
+            </>
+          )}
+        </div>
+      )}
     </header>
   );
 }

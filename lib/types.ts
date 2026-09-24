@@ -35,6 +35,24 @@ export interface WardenInvite {
   created_at: string;
 }
 
+export interface Member {
+  id: string;
+  campus_id: string;
+  campus_name?: string;
+  name: string;
+  email: string;
+  role: Role;
+  created_at: string;
+}
+
+export function normalizeName(n: string) {
+  return n.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+export function normalizeEmail(e: string) {
+  return e.trim().toLowerCase();
+}
+
 export interface Complaint {
   id: string;
   campus_id: string;

@@ -1,6 +1,7 @@
 import { getSupabaseBrowser } from "./supabaseClient";
 import { seedCampuses, seedComplaints } from "./seed";
-import type { Campus, Comment, Complaint, Status } from "./types";
+import type { Campus, Comment, Complaint, Member, Role, Status } from "./types";
+import { normalizeEmail, normalizeName } from "./types";
 
 // v2 keys (multi-tenant). Old v1 keys are migrated once.
 const CAMPUS_KEY = "campusfix_campuses_v2";
@@ -81,6 +82,7 @@ export function ensureSeed() {
     if (!mc) writeLocal(M_KEY, seedComments);
   }
   if (!readLocal<Comment[] | null>(M_KEY, null)) writeLocal(M_KEY, []);
+  seedMembersIfEmpty(campuses);
 }
 
 function sb() {
@@ -424,6 +426,170 @@ export async function uploadImage(file: File): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+// ---------------- ROSTER (private access — v3) ----------------
+// One row per person. Email UNIQUE GLOBALLY. Login = name+email exact
+// (normalized) match. Campus is auto-resolved — never picked by the user.
+
+const MEMBERS_KEY = "campusfix_members_v3";
+
+function seedMembersIfEmpty(campuses: Campus[]) {
+  const existing = readLocal<Member[]>(MEMBERS_KEY, []);
+  if (existing.length > 0) return existing;
+  const a = campuses[0];
+  const b = campuses[1] || campuses[0];
+  const seeded: Member[] = [
+    { id: uid("mbr"), campus_id: a.id, campus_name: a.name, name: "Campus Admin", email: "admin@greenfield.edu", role: "campus_admin", created_at: new Date().toISOString() },
+    { id: uid("mbr"), campus_id: a.id, campus_name: a.name, name: "Ravi Warden", email: "warden@greenfield.edu", role: "warden", created_at: new Date().toISOString() },
+    { id: uid("mbr"), campus_id: a.id, campus_name: a.name, name: "Aarav Patel", email: "aarav@greenfield.edu", role: "student", created_at: new Date().toISOString() },
+    { id: uid("mbr"), campus_id: b.id, campus_name: b.name, name: "Lake Admin", email: "admin@lakeview.edu", role: "campus_admin", created_at: new Date().toISOString() },
+  ];
+  writeLocal(MEMBERS_KEY, seeded);
+  return seeded;
+}
+
+export async function findMemberByEmail(email: string): Promise<(Member & { campus_name: string }) | null> {
+  const em = normalizeEmail(email);
+  const client = sb();
+  if (client) {
+    try {
+      const { data } = await client.from("members").select("*, campuses(name)").eq("email", em).limit(1);
+      // NOTE: postgrest lower() index; fallback to ilike if exact misses
+      let row: any = (data as any[])?.[0];
+      if (!row) {
+        const { data: d2 } = await client.from("members").select("*").ilike("email", em).limit(1);
+        row = (d2 as any[])?.[0];
+      }
+      if (row) {
+        const campuses = await fetchCampuses().catch(() => [] as Campus[]);
+        const camp = campuses.find((c) => c.id === row.campus_id);
+        return { ...row, campus_name: camp?.name || row.campus_name || "My Campus" };
+      }
+    } catch {}
+  }
+  ensureSeed();
+  const campuses = readLocal<Campus[]>(CAMPUS_KEY, []);
+  seedMembersIfEmpty(campuses);
+  const all = readLocal<Member[]>(MEMBERS_KEY, []);
+  const hit = all.find((m) => normalizeEmail(m.email) === em);
+  if (!hit) return null;
+  const camp = campuses.find((c) => c.id === hit.campus_id);
+  return { ...hit, campus_name: camp?.name || hit.campus_name || "My Campus" };
+}
+
+export async function fetchMembers(campusId: string): Promise<Member[]> {
+  const client = sb();
+  if (client) {
+    try {
+      const { data, error } = await client
+        .from("members")
+        .select("*")
+        .eq("campus_id", campusId)
+        .order("created_at", { ascending: false })
+        .limit(2000);
+      if (!error && data) return data as Member[];
+    } catch {}
+  }
+  ensureSeed();
+  return readLocal<Member[]>(MEMBERS_KEY, []).filter((m) => m.campus_id === campusId);
+}
+
+function assertMemberInput(name: string, email: string) {
+  if (name.trim().replace(/\s+/g, " ").length < 2) throw new Error("Enter the full name.");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) throw new Error("Enter a valid email.");
+}
+
+export async function addMember(
+  campusId: string,
+  name: string,
+  email: string,
+  role: Role
+): Promise<Member> {
+  const cleanName = name.trim().replace(/\s+/g, " ");
+  const cleanEmail = normalizeEmail(email);
+  assertMemberInput(cleanName, cleanEmail);
+  if (!["student", "warden", "campus_admin"].includes(role)) throw new Error("Invalid role.");
+  // global uniqueness
+  const existing = await findMemberByEmail(cleanEmail);
+  if (existing) throw new Error("This email is already registered (emails are unique across all campuses).");
+
+  const client = sb();
+  if (client) {
+    try {
+      const { data, error } = await client
+        .from("members")
+        .insert({ campus_id: campusId, name: cleanName, email: cleanEmail, role })
+        .select()
+        .single();
+      if (!error && data) {
+        notifyLocal();
+        return data as Member;
+      }
+    } catch {}
+  }
+  const campuses = readLocal<Campus[]>(CAMPUS_KEY, []);
+  seedMembersIfEmpty(campuses);
+  const row: Member = { id: uid("mbr"), campus_id: campusId, name: cleanName, email: cleanEmail, role, created_at: new Date().toISOString() };
+  const all = readLocal<Member[]>(MEMBERS_KEY, []);
+  all.push(row);
+  writeLocal(MEMBERS_KEY, all);
+  notifyLocal();
+  return row;
+}
+
+export interface BulkResult {
+  added: number;
+  skipped: { line: number; reason: string }[];
+}
+
+export function parseRosterCsv(text: string): { name: string; email: string; role: Role }[] {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return [];
+  // drop header if present
+  const first = lines[0].toLowerCase();
+  const hasHeader = first.includes("name") && first.includes("email");
+  const body = hasHeader ? lines.slice(1) : lines;
+  return body.map((line) => {
+    const parts = line.split(/[,;\t]/).map((p) => p.trim()).filter((p) => p.length > 0);
+    const [name = "", email = "", roleRaw = "student"] = parts;
+    const r = roleRaw.toLowerCase();
+    const role: Role = r.startsWith("warden") ? "warden" : r.includes("admin") ? "campus_admin" : "student";
+    return { name, email, role };
+  });
+}
+
+export async function bulkAddMembers(
+  campusId: string,
+  csvText: string,
+  addedBy: string
+): Promise<BulkResult> {
+  void addedBy;
+  const rows = parseRosterCsv(csvText).slice(0, 1000);
+  let added = 0;
+  const skipped: BulkResult["skipped"] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    try {
+      await addMember(campusId, r.name, r.email, r.role);
+      added += 1;
+    } catch (e: any) {
+      skipped.push({ line: i + 1, reason: e?.message || "Skipped" });
+    }
+  }
+  return { added, skipped };
+}
+
+export async function removeMember(campusId: string, memberId: string): Promise<void> {
+  const client = sb();
+  if (client) {
+    try {
+      await client.from("members").delete().eq("id", memberId).eq("campus_id", campusId);
+    } catch {}
+  }
+  const all = readLocal<Member[]>(MEMBERS_KEY, []);
+  writeLocal(MEMBERS_KEY, all.filter((m) => !(m.id === memberId && m.campus_id === campusId)));
+  notifyLocal();
 }
 
 // ---------------- REALTIME ----------------

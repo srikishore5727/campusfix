@@ -5,39 +5,44 @@ import Link from "next/link";
 import { StatusBadge, timeAgo } from "@/components/ComplaintCard";
 import { useAuth } from "@/lib/auth";
 import {
+  addMember,
+  bulkAddMembers,
   fetchComplaints,
-  fetchWardenInvites,
-  inviteWarden,
-  removeWardenInvite,
+  fetchMembers,
+  removeMember,
   subscribeCampusUpdates,
   updateStatus,
-  type WardenInviteRow,
 } from "@/lib/store";
-import type { Complaint, Status } from "@/lib/types";
+import type { Complaint, Member, Role, Status } from "@/lib/types";
 import { canManageComplaints } from "@/lib/types";
 
 export default function AdminPage() {
   const { user, loading: authLoading } = useAuth();
   const [items, setItems] = useState<Complaint[]>([]);
-  const [wardens, setWardens] = useState<WardenInviteRow[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
-  const [email, setEmail] = useState("");
-  const [wErr, setWErr] = useState("");
-  const [wBusy, setWBusy] = useState(false);
+  const [mName, setMName] = useState("");
+  const [mEmail, setMEmail] = useState("");
+  const [mRole, setMRole] = useState<Role>("student");
+  const [mErr, setMErr] = useState("");
+  const [mBusy, setMBusy] = useState(false);
+  const [csv, setCsv] = useState("");
+  const [csvResult, setCsvResult] = useState("");
+  const [search, setSearch] = useState("");
 
   const load = useCallback(async () => {
     if (!user) {
       setLoading(false);
       return;
     }
-    const [c, w] = await Promise.all([
+    const [c, m] = await Promise.all([
       fetchComplaints(user.campus_id),
-      fetchWardenInvites(user.campus_id),
+      user.role === "campus_admin" ? fetchMembers(user.campus_id) : Promise.resolve([] as Member[]),
     ]);
     setItems(c);
-    setWardens(w);
+    setMembers(m);
     setLoading(false);
-  }, [user?.campus_id]);
+  }, [user?.campus_id, user?.role]);
 
   useEffect(() => {
     if (!authLoading) load();
@@ -51,33 +56,74 @@ export default function AdminPage() {
       open: items.filter((i) => i.status === "open").length,
       in_progress: items.filter((i) => i.status === "in_progress").length,
       resolved: items.filter((i) => i.status === "resolved").length,
+      students: members.filter((m) => m.role === "student").length,
+      wardens: members.filter((m) => m.role === "warden").length,
     }),
-    [items]
+    [items, members]
   );
+
+  const visibleMembers = useMemo(() => {
+    const s = search.trim().toLowerCase();
+    const list = s
+      ? members.filter(
+          (m) => m.name.toLowerCase().includes(s) || m.email.toLowerCase().includes(s)
+        )
+      : members;
+    return [...list].sort((a, b) => a.name.localeCompare(b.name));
+  }, [members, search]);
 
   async function setStatus(id: string, s: Status) {
     setItems((p) => p.map((x) => (x.id === id ? { ...x, status: s } : x)));
     await updateStatus(id, s);
   }
 
-  async function addWarden() {
-    setWErr("");
+  async function addSingle() {
+    setMErr("");
     if (!user) return;
-    setWBusy(true);
+    setMBusy(true);
     try {
-      const row = await inviteWarden(user.campus_id, email, user.id);
-      setWardens((p) => [row, ...p]);
-      setEmail("");
+      const row = await addMember(user.campus_id, mName, mEmail, mRole);
+      setMembers((p) => [row, ...p]);
+      setMName("");
+      setMEmail("");
     } catch (e: any) {
-      setWErr(e?.message || "Could not add.");
+      setMErr(e?.message || "Could not add.");
     } finally {
-      setWBusy(false);
+      setMBusy(false);
     }
   }
 
-  async function removeW(id: string) {
-    await removeWardenInvite(id);
-    setWardens((p) => p.filter((w) => w.id !== id));
+  async function runBulk() {
+    setCsvResult("");
+    if (!user) return;
+    if (!csv.trim()) {
+      setCsvResult("Paste CSV rows first. Format per line: Name, Email, Role");
+      return;
+    }
+    setMBusy(true);
+    try {
+      const r = await bulkAddMembers(user.campus_id, csv, user.id);
+      setCsv("");
+      await load();
+      setCsvResult(
+        `Added ${r.added}.${r.skipped.length ? ` Skipped ${r.skipped.length}: ` + r.skipped.slice(0, 5).map((s) => `line ${s.line} (${s.reason})`).join("; ") + (r.skipped.length > 5 ? "…" : "") : ""}`
+      );
+    } finally {
+      setMBusy(false);
+    }
+  }
+
+  async function onFile(file: File | undefined) {
+    if (!file) return;
+    const text = await file.text();
+    setCsv(text.slice(0, 200000));
+  }
+
+  async function removeM(id: string) {
+    if (!user) return;
+    if (!confirm("Remove this person? They will no longer be able to login.")) return;
+    await removeMember(user.campus_id, id);
+    setMembers((p) => p.filter((m) => m.id !== id));
   }
 
   if (!authLoading && !user)
@@ -92,9 +138,9 @@ export default function AdminPage() {
       <div className="rounded-2xl border bg-white p-6 text-sm">
         <p className="font-bold">Wardens and campus admins only.</p>
         <p className="mt-1 text-zinc-600">
-          You are logged in as {user.name} (student, {user.campus_name}). Students track progress on the feed.
+          You are logged in as {user.name} (student, {user.campus_name}).
         </p>
-        <Link href="/" className="mt-3 inline-block font-bold underline">Go to feed</Link>
+        <Link href="/" className="mt-3 inline-block font-bold underline">Go to my campus</Link>
       </div>
     );
 
@@ -121,33 +167,91 @@ export default function AdminPage() {
 
       {user?.role === "campus_admin" && (
         <section className="rounded-3xl border bg-white p-4 sm:p-5">
-          <h2 className="font-bold">Manage wardens</h2>
+          <h2 className="font-bold">Members — {members.length} registered</h2>
           <p className="mt-0.5 text-xs text-zinc-500 sm:text-sm">
-            Add warden emails. Only added emails can sign up as warden for {user.campus_name}.
+            Add wardens + students here (single or CSV bulk). Login checks Name + Email exactly; emails are
+            unique across all campuses. {stats.students} students • {stats.wardens} wardens.
           </p>
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+
+          <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_150px_auto]">
             <input
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="warden@college.edu"
-              type="email"
-              className="min-h-[46px] flex-1 rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm outline-none focus:border-zinc-900"
+              value={mName}
+              onChange={(e) => setMName(e.target.value)}
+              placeholder="Full name"
+              className="min-h-[46px] rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm outline-none focus:border-zinc-900"
             />
+            <input
+              value={mEmail}
+              onChange={(e) => setMEmail(e.target.value)}
+              placeholder="Email"
+              type="email"
+              className="min-h-[46px] rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm outline-none focus:border-zinc-900"
+            />
+            <select
+              value={mRole}
+              onChange={(e) => setMRole(e.target.value as Role)}
+              className="min-h-[46px] rounded-xl border border-zinc-300 px-3 py-2.5 text-sm"
+            >
+              <option value="student">Student</option>
+              <option value="warden">Warden</option>
+              <option value="campus_admin">Admin</option>
+            </select>
             <button
-              onClick={addWarden}
-              disabled={wBusy}
+              onClick={addSingle}
+              disabled={mBusy}
               className="flex min-h-[46px] items-center justify-center rounded-xl bg-zinc-900 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50"
             >
-              {wBusy ? "Adding…" : "+ Add warden"}
+              {mBusy ? "Adding…" : "+ Add"}
             </button>
           </div>
-          {wErr && <p className="mt-2 text-xs font-medium text-red-600">{wErr}</p>}
-          <div className="mt-3 space-y-1.5">
-            {wardens.length === 0 && <p className="text-sm text-zinc-500">No wardens added yet.</p>}
-            {wardens.map((w) => (
-              <div key={w.id} className="flex items-center justify-between gap-2 rounded-xl bg-zinc-50 border px-3 py-2.5 text-sm">
-                <span className="truncate font-medium">{w.email}</span>
-                <button onClick={() => removeW(w.id)} className="shrink-0 rounded-full border border-zinc-300 px-3 py-1.5 text-xs font-bold hover:bg-white">
+          {mErr && <p className="mt-2 text-xs font-medium text-red-600">{mErr}</p>}
+
+          <div className="mt-4 rounded-2xl bg-zinc-50 border p-3 sm:p-4">
+            <p className="text-sm font-bold">Bulk upload (CSV) — best for 300+ students</p>
+            <p className="mt-0.5 font-mono text-[11px] text-zinc-500">Name, Email, Role — one per line. Header row optional.</p>
+            <textarea
+              value={csv}
+              onChange={(e) => setCsv(e.target.value)}
+              rows={4}
+              placeholder={"Aarav Patel, aarav@college.edu, student\nRavi Warden, warden@college.edu, warden"}
+              className="mt-2 min-h-[100px] w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 font-mono text-xs outline-none focus:border-zinc-900"
+            />
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+              <label className="flex min-h-[44px] cursor-pointer items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-zinc-100">
+                Choose .csv file
+                <input type="file" accept=".csv,text/csv,text/plain" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
+              </label>
+              <button
+                onClick={runBulk}
+                disabled={mBusy}
+                className="flex min-h-[44px] items-center justify-center rounded-xl bg-zinc-900 px-5 py-2 text-sm font-bold text-white disabled:opacity-50"
+              >
+                Upload members
+              </button>
+            </div>
+            {csvResult && <p className="mt-2 text-xs font-medium text-zinc-700">{csvResult}</p>}
+          </div>
+
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search members…"
+            className="mt-3 min-h-[44px] w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm outline-none focus:border-zinc-900"
+          />
+          <div className="mt-2 max-h-72 space-y-1.5 overflow-y-auto">
+            {visibleMembers.length === 0 && <p className="text-sm text-zinc-500">No members yet.</p>}
+            {visibleMembers.map((m) => (
+              <div key={m.id} className="flex items-center justify-between gap-2 rounded-xl bg-zinc-50 border px-3 py-2.5 text-sm">
+                <div className="min-w-0">
+                  <p className="truncate font-semibold">{m.name}</p>
+                  <p className="truncate text-xs text-zinc-500">{m.email} • {m.role}</p>
+                </div>
+                <button
+                  onClick={() => removeM(m.id)}
+                  disabled={m.id === user?.id}
+                  className="shrink-0 rounded-full border border-zinc-300 px-3 py-1.5 text-xs font-bold hover:bg-white disabled:opacity-40"
+                  title={m.id === user?.id ? "You cannot remove yourself" : "Remove"}
+                >
                   Remove
                 </button>
               </div>

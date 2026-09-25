@@ -8,6 +8,18 @@ export function statusColor(s: Complaint["status"]) {
   return "bg-green-100 text-green-700 border-green-200";
 }
 
+// BRAG-style action buttons: Open=red, In Progress=amber, Resolved=green.
+export function statusButton(s: Complaint["status"], active: boolean) {
+  if (active) {
+    if (s === "open") return "bg-red-600 text-white border-red-600";
+    if (s === "in_progress") return "bg-amber-500 text-white border-amber-500";
+    return "bg-green-600 text-white border-green-600";
+  }
+  if (s === "open") return "border-red-300 text-red-700 bg-white hover:bg-red-50";
+  if (s === "in_progress") return "border-amber-300 text-amber-800 bg-white hover:bg-amber-50";
+  return "border-green-300 text-green-700 bg-white hover:bg-green-50";
+}
+
 export function StatusBadge({ status }: { status: Complaint["status"] }) {
   return (
     <span
@@ -76,7 +88,8 @@ export default function ComplaintCard({
               src={c.image_url}
               alt=""
               loading="lazy"
-              className="mt-2 h-24 w-full rounded-xl border object-cover sm:h-32"
+              decoding="async"
+              className="mt-2 h-24 w-full rounded-xl border border-zinc-200 bg-zinc-100 object-cover sm:h-32"
             />
           )}
           <p className="mt-2 truncate text-xs text-zinc-500">

@@ -62,7 +62,10 @@ export default function Navbar() {
             width={140}
             height={32}
             priority
-            className="h-7 w-auto sm:h-8"
+            fetchPriority="high"
+            loading="eager"
+            decoding="async"
+            className="h-7 w-auto shrink-0 sm:h-8"
           />
           {user && (
             <span className="hidden max-w-[200px] truncate rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 sm:block">

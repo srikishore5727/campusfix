@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { StatusBadge, timeAgo } from "@/components/ComplaintCard";
+import { StatusBadge, statusButton, timeAgo } from "@/components/ComplaintCard";
 import { useAuth } from "@/lib/auth";
 import {
   addMember,
@@ -371,9 +371,7 @@ export default function AdminPage() {
                       <button
                         key={s}
                         onClick={() => setStatus(c.id, s)}
-                        className={`flex min-h-[42px] items-center justify-center rounded-full border px-3 py-1.5 text-xs font-bold transition ${
-                          c.status === s ? "bg-zinc-900 text-white border-zinc-900" : "border-zinc-300 hover:border-zinc-900"
-                        }`}
+                        className={`flex min-h-[42px] items-center justify-center rounded-full border px-3 py-1.5 text-xs font-bold transition ${statusButton(s, c.status === s)}`}
                       >
                         {s === "open" ? "Open" : s === "in_progress" ? "In Prog." : "Resolved"}
                       </button>

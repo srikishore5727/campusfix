@@ -118,10 +118,27 @@ export default function NewPage() {
 
         <div>
           <p className="text-sm font-bold">Photo proof <span className="font-normal text-zinc-500">(optional)</span></p>
-          <input type="file" accept="image/*" onChange={(e) => onFile(e.target.files?.[0])} className="mt-2 w-full text-sm" />
+          <div className="mt-2 flex flex-col gap-2 rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-3 sm:flex-row sm:items-center">
+            <label
+              htmlFor="cf-photo"
+              className="inline-flex min-h-[46px] cursor-pointer items-center justify-center gap-2 rounded-xl bg-zinc-900 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-zinc-700 active:scale-[0.99]"
+            >
+              <span aria-hidden>📷</span> Choose photo
+            </label>
+            <span className="truncate text-xs text-zinc-500">
+              {file ? file.name : "No photo selected — JPG/PNG under 4MB"}
+            </span>
+            <input
+              id="cf-photo"
+              type="file"
+              accept="image/*"
+              onChange={(e) => onFile(e.target.files?.[0])}
+              className="sr-only"
+            />
+          </div>
           {preview && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={preview} alt="preview" className="mt-2 max-h-56 w-full rounded-2xl border object-cover" />
+            <img src={preview} alt="preview" decoding="async" className="mt-2 max-h-56 w-full rounded-2xl border border-zinc-200 bg-zinc-100 object-cover" />
           )}
         </div>
 

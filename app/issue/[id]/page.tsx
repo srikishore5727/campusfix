@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { StatusBadge, timeAgo } from "@/components/ComplaintCard";
+import { StatusBadge, statusButton, timeAgo } from "@/components/ComplaintCard";
 import { useAuth } from "@/lib/auth";
 import {
   addComment,
@@ -187,7 +187,7 @@ export default function IssuePage({ params }: { params: Promise<{ id: string }> 
         <p className="mt-3 whitespace-pre-wrap text-[15px] leading-relaxed">{item.description}</p>
         {item.image_url && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={item.image_url} alt="proof" className="mt-3 max-h-96 w-full rounded-2xl border object-cover" />
+          <img src={item.image_url} alt="proof" loading="lazy" decoding="async" className="mt-3 max-h-96 w-full rounded-2xl border border-zinc-200 bg-zinc-100 object-cover" />
         )}
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -217,9 +217,7 @@ export default function IssuePage({ params }: { params: Promise<{ id: string }> 
                 <button
                   key={s}
                   onClick={() => setStatus(s)}
-                  className={`flex min-h-[44px] items-center justify-center rounded-xl border px-2 py-2 text-xs font-bold transition sm:text-[13px] ${
-                    item.status === s ? "bg-zinc-900 text-white border-zinc-900" : "border-zinc-300 bg-white"
-                  }`}
+                  className={`flex min-h-[44px] items-center justify-center rounded-xl border px-2 py-2 text-xs font-bold transition sm:text-[13px] ${statusButton(s, item.status === s)}`}
                 >
                   {STATUS_LABEL[s]}
                 </button>

@@ -163,11 +163,20 @@ export default function TeamPage() {
           {visible.map((c) => (
             <div key={c.id} className="rounded-2xl border bg-white p-4 sm:p-5">
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="text-base font-bold">{c.name}</p>
-                  <p className="mt-0.5 text-xs text-zinc-500">
-                    Contact: {c.contact_name || "—"} • {c.contact_email || "—"} •{" "}
-                    {new Date(c.created_at).toLocaleString()}
+                  <div className="mt-2 grid gap-1.5 rounded-xl bg-zinc-50 border p-3 text-[13px] sm:grid-cols-2">
+                    <p className="truncate">
+                      <span className="font-bold text-zinc-500">Registered by: </span>
+                      <span className="font-semibold text-zinc-900">{c.contact_name || "—"}</span>
+                    </p>
+                    <p className="truncate">
+                      <span className="font-bold text-zinc-500">Email: </span>
+                      <span className="font-semibold text-zinc-900">{c.contact_email || "—"}</span>
+                    </p>
+                  </div>
+                  <p className="mt-1.5 text-xs text-zinc-500">
+                    Applied {new Date(c.created_at).toLocaleString()}
                   </p>
                   {c.status === "rejected" && c.reject_reason && (
                     <p className="mt-1 text-xs text-red-600">Decline reason: {c.reject_reason}</p>
@@ -212,10 +221,6 @@ export default function TeamPage() {
 
       <section className="rounded-3xl border bg-white p-4 sm:p-5">
         <h2 className="font-bold">Decision emails ({mails.length})</h2>
-        <p className="text-xs text-zinc-500">
-          Auto-sent on approve/decline from your Gmail (set GMAIL_USER + GMAIL_APP_PASSWORD). Without it,
-          mails are only logged here.
-        </p>
         <div className="mt-3 max-h-80 space-y-2 overflow-y-auto">
           {mails.length === 0 && <p className="text-sm text-zinc-500">No emails yet.</p>}
           {mails.map((m) => (

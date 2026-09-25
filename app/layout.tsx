@@ -22,6 +22,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        <link rel="preload" href="/campusfix-logo.png" as="image" fetchPriority="high" />
+      </head>
       <body className="min-h-screen bg-[#fafafa] text-zinc-900 antialiased">
         <AuthProvider>
           <Navbar />

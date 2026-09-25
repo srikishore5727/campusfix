@@ -18,12 +18,12 @@ export default function NewPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
-  if (typeof window !== "undefined" && !user) {
-    // soft guard (layout still renders); redirect on submit too
-  }
-
   async function onFile(f: File | undefined) {
     if (!f) return;
+    if (f.size > 4 * 1024 * 1024) {
+      setErr("Image must be under 4MB.");
+      return;
+    }
     setFile(f);
     const r = new FileReader();
     r.onload = () => setPreview(r.result as string);
@@ -41,13 +41,21 @@ export default function NewPage() {
       return;
     }
     if (description.trim().length < 15) {
-      setErr("Description must be at least 15 characters — explain where + since when.");
+      setErr("Describe where + since when (min 15 characters).");
       return;
     }
     setBusy(true);
     try {
-      const image_url = file ? await uploadImage(file) : null;
+      let image_url: string | null = null;
+      if (file) {
+        try {
+          image_url = await uploadImage(file);
+        } catch (e: any) {
+          setErr(e?.message || "Image upload failed — submitting without photo.");
+        }
+      }
       const c = await createComplaint({
+        campus_id: user.campus_id,
         user_id: user.id,
         user_name: user.name,
         title: title.trim(),
@@ -57,99 +65,87 @@ export default function NewPage() {
         image_url,
       });
       router.push(`/issue/${c.id}`);
-    } catch (e) {
+    } catch {
       setErr("Failed to create. Please try again.");
     } finally {
       setBusy(false);
     }
   }
 
+  const inputCls =
+    "mt-1 min-h-[44px] w-full rounded-xl border border-zinc-300 px-3.5 py-2.5 text-sm font-normal outline-none transition focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10";
+
   return (
-    <div className="mx-auto max-w-2xl space-y-4">
+    <div className="mx-auto w-full max-w-2xl space-y-4">
       <div>
-        <h1 className="text-2xl font-bold">Report an issue</h1>
+        <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Report an issue</h1>
         <p className="text-sm text-zinc-500">
-          Good reports get fixed faster: exact location + photo + since when.
+          Posting to <b>{user?.campus_name || "your campus"}</b> — only your campus will see this.
         </p>
       </div>
 
       {!user && (
-        <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-          You are not logged in. <a href="/login" className="font-bold underline">Login first</a> — it takes 5 seconds with demo login.
+        <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          Please <a href="/login" className="font-bold underline">login</a> with your campus account first.
         </p>
       )}
 
-      <div className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-5">
-        <label className="block text-sm font-semibold">
+      <div className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-4 sm:p-6">
+        <label className="block text-sm font-bold">
           Title
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="e.g. No water on 3rd floor, Block B since morning"
-            className="mt-1 w-full rounded-xl border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-zinc-900"
-          />
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. No water on 3rd floor, Block B since morning" className={inputCls} maxLength={120} />
         </label>
 
         <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block text-sm font-semibold">
+          <label className="block text-sm font-bold">
             Category
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value as Category)}
-              className="mt-1 w-full rounded-xl border border-zinc-300 px-3 py-2 text-sm font-normal"
-            >
+            <select value={category} onChange={(e) => setCategory(e.target.value as Category)} className={inputCls}>
               {CATEGORIES.map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
             </select>
           </label>
-          <label className="block text-sm font-semibold">
+          <label className="block text-sm font-bold">
             Block / Location
-            <input
-              value={block}
-              onChange={(e) => setBlock(e.target.value)}
-              placeholder="Block A / Mess / Library…"
-              className="mt-1 w-full rounded-xl border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-zinc-900"
-            />
+            <input value={block} onChange={(e) => setBlock(e.target.value)} placeholder="Block A / Mess / Library…" className={inputCls} />
           </label>
         </div>
 
-        <label className="block text-sm font-semibold">
+        <label className="block text-sm font-bold">
           Description
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={4}
-            placeholder="Where exactly? Since when? How many rooms affected? Any prior complaint?"
-            className="mt-1 w-full rounded-xl border border-zinc-300 px-3 py-2 text-sm font-normal outline-none focus:border-zinc-900"
-          />
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} placeholder="Where exactly? Since when? How many rooms affected?" className={`${inputCls} min-h-[110px]`} />
         </label>
 
         <div>
-          <p className="text-sm font-semibold">Photo proof (optional)</p>
-          <input
-            type="file"
-            accept="image/*"
-            onChange={(e) => onFile(e.target.files?.[0])}
-            className="mt-1 w-full text-sm"
-          />
+          <p className="text-sm font-bold">Photo proof <span className="font-normal text-zinc-500">(optional)</span></p>
+          <div className="mt-2 flex flex-col gap-2 rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 p-3 sm:flex-row sm:items-center">
+            <label
+              htmlFor="cf-photo"
+              className="inline-flex min-h-[46px] cursor-pointer items-center justify-center gap-2 rounded-xl bg-zinc-900 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-zinc-700 active:scale-[0.99]"
+            >
+              Choose photo
+            </label>
+            <span className="truncate text-xs text-zinc-500">
+              {file ? file.name : "No photo selected — JPG/PNG under 4MB"}
+            </span>
+            <input
+              id="cf-photo"
+              type="file"
+              accept="image/*"
+              onChange={(e) => onFile(e.target.files?.[0])}
+              className="sr-only"
+            />
+          </div>
           {preview && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={preview} alt="preview" className="mt-2 max-h-56 rounded-xl border" />
+            <img src={preview} alt="preview" decoding="async" className="mt-2 max-h-56 w-full rounded-2xl border border-zinc-200 bg-zinc-100 object-cover" />
           )}
-          <p className="mt-1 text-xs text-zinc-500">
-            Stored in Supabase Storage bucket <code>complaint-images</code> when configured; otherwise preview-only demo.
-          </p>
         </div>
 
-        {err && <p className="text-sm font-medium text-red-600">{err}</p>}
+        {err && <p className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm font-medium text-red-700">{err}</p>}
 
-        <button
-          onClick={submit}
-          disabled={busy}
-          className="w-full rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50 hover:bg-zinc-700"
-        >
-          {busy ? "Submitting…" : "Submit complaint"}
+        <button onClick={submit} disabled={busy || !user} className="min-h-[50px] w-full rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-bold text-white transition hover:bg-zinc-700 active:scale-[0.99] disabled:opacity-50">
+          {busy ? "Submitting…" : "Submit to my campus"}
         </button>
       </div>
     </div>

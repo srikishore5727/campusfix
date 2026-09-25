@@ -1,4 +1,4 @@
-import type { Complaint } from "./types";
+import type { Campus, Complaint } from "./types";
 
 function uid(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random()
@@ -6,13 +6,41 @@ function uid(prefix: string) {
     .slice(2, 7)}`;
 }
 
-const now = (minsAgo: number) => new Date(Date.now() - minsAgo * 60000).toISOString();
+const now = (minsAgo: number) =>
+  new Date(Date.now() - minsAgo * 60000).toISOString();
+
+export const SEED_CAMPUS_A_ID = "campus_greenfield";
+export const SEED_CAMPUS_B_ID = "campus_lakeview";
+
+export function seedCampuses(): Campus[] {
+  return [
+    {
+      id: SEED_CAMPUS_A_ID,
+      name: "Greenfield Institute of Technology",
+      slug: "greenfield",
+      created_at: now(60 * 24 * 30),
+      status: "approved",
+      contact_name: "Campus Admin",
+      contact_email: "admin@greenfield.edu",
+    },
+    {
+      id: SEED_CAMPUS_B_ID,
+      name: "Lakeview College of Arts",
+      slug: "lakeview",
+      created_at: now(60 * 24 * 20),
+      status: "approved",
+      contact_name: "Lake Admin",
+      contact_email: "admin@lakeview.edu",
+    },
+  ];
+}
 
 export function seedComplaints(): Complaint[] {
   return [
     {
       id: uid("c"),
-      user_id: "demo_student_1",
+      campus_id: SEED_CAMPUS_A_ID,
+      user_id: "seed_student_1",
       user_name: "Aarav Patel",
       title: "No water supply on 3rd floor, Block B",
       description:
@@ -27,7 +55,8 @@ export function seedComplaints(): Complaint[] {
     },
     {
       id: uid("c"),
-      user_id: "demo_student_2",
+      campus_id: SEED_CAMPUS_A_ID,
+      user_id: "seed_student_2",
       user_name: "Sneha Reddy",
       title: "Wifi down in library wing",
       description:
@@ -42,7 +71,8 @@ export function seedComplaints(): Complaint[] {
     },
     {
       id: uid("c"),
-      user_id: "demo_student_3",
+      campus_id: SEED_CAMPUS_A_ID,
+      user_id: "seed_student_3",
       user_name: "Rahul Verma",
       title: "Tube light + fan not working, Room 204",
       description:
@@ -57,7 +87,8 @@ export function seedComplaints(): Complaint[] {
     },
     {
       id: uid("c"),
-      user_id: "demo_student_4",
+      campus_id: SEED_CAMPUS_A_ID,
+      user_id: "seed_student_4",
       user_name: "Priya Nair",
       title: "Washrooms not cleaned for 3 days, Block C",
       description:
@@ -72,11 +103,12 @@ export function seedComplaints(): Complaint[] {
     },
     {
       id: uid("c"),
-      user_id: "demo_student_5",
+      campus_id: SEED_CAMPUS_B_ID,
+      user_id: "seed_student_5",
       user_name: "Kiran Kumar",
       title: "Mess food quality dropped, dinner batch 2",
       description:
-        "Found undercooked rice twice this week in batch 2 (8 PM). Please check mess contractor.",
+        "Undercooked rice twice this week in batch 2 (8 PM). Please check mess contractor.",
       category: "Mess",
       block: "Mess Hall",
       status: "in_progress",
@@ -87,9 +119,10 @@ export function seedComplaints(): Complaint[] {
     },
     {
       id: uid("c"),
-      user_id: "demo_student_6",
+      campus_id: SEED_CAMPUS_B_ID,
+      user_id: "seed_student_6",
       user_name: "Divya Sharma",
-      title: "Street light dead near girls hostel gate",
+      title: "Street light dead near hostel gate",
       description:
         "Path from main gate to Block D is fully dark after 7 PM. Safety issue, please fix urgently.",
       category: "Electricity",
@@ -102,11 +135,12 @@ export function seedComplaints(): Complaint[] {
     },
     {
       id: uid("c"),
-      user_id: "demo_student_7",
+      campus_id: SEED_CAMPUS_B_ID,
+      user_id: "seed_student_7",
       user_name: "Arjun Mehta",
       title: "Broken tap leaking continuously, Block A",
       description:
-        "Common washbasin tap near room 110 leaking 24x7, wasting lot of water. Needs washer replacement.",
+        "Common washbasin tap near room 110 leaking 24x7. Needs washer replacement.",
       category: "Water",
       block: "Block A",
       status: "resolved",
@@ -117,11 +151,11 @@ export function seedComplaints(): Complaint[] {
     },
     {
       id: uid("c"),
-      user_id: "demo_student_8",
+      campus_id: SEED_CAMPUS_A_ID,
+      user_id: "seed_student_8",
       user_name: "Ishita Singh",
       title: "Garbage pile behind canteen",
-      description:
-        "Huge garbage pile behind canteen attracting dogs. Needs daily pickup.",
+      description: "Huge garbage pile behind canteen attracting dogs.",
       category: "Cleaning",
       block: "Canteen",
       status: "open",

@@ -1,83 +1,71 @@
-# CampusFix — Hostel / PG Complaint & Maintenance Tracker
+# CampusFix — Multi-Campus Complaint & Maintenance Tracker
 
-> Real-world fullstack project: students report maintenance issues with photo proof, upvote what affects them, and track `Open → In Progress → Resolved` transparently. Warden gets a priority dashboard.
+> One platform, many colleges. Each campus gets an isolated space: students report issues with photo proof, upvote what affects them, and watch wardens move it Open → In Progress → Resolved. Campus registrations are verified by the app team before going live.
 
-**Stack:** Next.js 14 App Router (frontend + backend) · Supabase (Postgres + Auth + Storage) · Tailwind · Vercel deploy
+**Live demo:** https://campusfix-8tiz.vercel.app/
+**Health check:** https://campusfix-8tiz.vercel.app/api/health
 
-**Live demo:** _(paste your Vercel URL here after deploy)_ `https://campusfix.vercel.app`
-**Demo logins (no signup needed):** Login page → Demo tab → `Student` / `Warden (admin)`
+**Stack:** Next.js 16 (App Router) · Supabase (Postgres + Storage + Realtime) · Tailwind CSS 4 · Vercel
 
 ---
 
-## Why this is resume-worthy (not a generic todo)
+## Why this isn't a generic project
 
-- Real workflow: role-based access (student vs warden), status state-machine, upvotes for prioritization, comments thread, image evidence
-- Real backend: Postgres with Row Level Security, `upvotes` join table + trigger maintaining `upvotes_count`, Storage bucket with public-read/auth-write policies
-- Balanced FE/BE: 6 pages + 1 health API + Supabase schema + seed + RLS
+- **Multi-tenant by design** — every row scoped by `campus_id`; cross-campus access blocked in UI and in every query
+- **Approval workflow** — new campuses register once (normalized-name dedupe), sit in `pending`, and only unlock after team verification; Approve/Decline triggers an automatic decision email
+- **Private roster auth** — no public signup, no campus list to scrape; campus admins add members (single or CSV bulk for 300+ students); login checks Name + Email exactly and auto-routes you to your campus
+- **Realtime + honest errors** — Supabase Realtime channels with polling fallback; when the DB is unreachable the UI says so instead of silently showing fake data (`/api/health` proves live status)
 
-## Features (all working)
+## Roles
 
-1. **Auth** — instant Demo login (student/admin) + real Supabase email/password when env vars are set
-2. **Report issue** — title, category, block, description, photo upload
-3. **Feed** — search + filter by status/category + sort by Top/New + upvote
-4. **Issue detail** — status timeline, photo, comments (warden badge), admin can change status inline
-5. **My issues** — logged-in student's own reports
-6. **Admin dashboard** — counts, sorted by votes, one-click Open/In Progress/Resolved
+| Role | Can do |
+|---|---|
+| Student | Report issues, upvote, comment, track own campus feed |
+| Warden | Everything above + change issue status (added by campus admin) |
+| Campus admin | Everything above + manage members (add / CSV bulk / remove, last-admin protected) |
+| CampusFix team (`/team`) | Verify campuses: Approve / Decline with reason; decision-email log |
 
-Works **without any Supabase setup** (localStorage demo mode with 8 seeded issues) and **automatically switches to Supabase** once env vars are present.
+## Try it live (2 min)
 
-## Run locally (2 min, no Supabase needed)
+1. Open https://campusfix-8tiz.vercel.app/ → **Register a new campus** (any test college name + your name/email) → lands on **verification in progress**
+2. Team login at `/team` restores your campus after approval — for a quick self-test, register, then check status on `/pending`
+3. As campus admin: **Dashboard → Members** → add a student → login as them → **Report** an issue with a photo → upvote it → watch counts update
+4. As warden/admin: open the issue → set **In Progress** (amber) → comment → **Resolved** (green)
+
+## Run locally
 
 ```bash
 cd campusfix
 npm install
 npm run dev
-# open http://localhost:3000
+# http://localhost:3000
 ```
 
-Login → Demo → Student → Report an issue → upvote → open incognito → login as Admin → resolve it.
+Without Supabase env vars the app runs on seeded local demo data (2 colleges). With env vars it uses Supabase exclusively — see `SETUP_GUIDE.md`.
 
-## Connect Supabase (10 min, makes it real fullstack)
+## Project map
 
-1. Go to supabase.com → New project → copy Project URL + `anon public` key.
-2. **SQL Editor → New query → paste `supabase/schema.sql` → Run.** Then optionally run `supabase/seed.sql`.
-3. **Storage → New bucket →** name `complaint-images`, Public ON.
-4. **Authentication → Providers → Email → ON.** Disable "Confirm email" for fast demo (or keep ON for realism).
-5. Create `.env.local` from `.env.example`:
-```bash
-NEXT_PUBLIC_SUPABASE_URL=https://xyzcompany.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOi...
-NEXT_PUBLIC_ADMIN_EMAILS=youremail@gmail.com
 ```
-6. Restart `npm run dev`. Now creates/reads/writes hit Postgres. Check Supabase → Table Editor to see rows appear live.
-
-Where things interconnect:
-- `lib/supabaseClient.ts` reads the 2 env vars. If missing → localStorage mode.
-- `lib/store.ts` is the ONLY data layer: every page calls it; it tries Supabase first, falls back to local.
-- `lib/auth.tsx` handles demo session (localStorage) + Supabase `signInWithPassword`/`signUp`; admin role = email in `NEXT_PUBLIC_ADMIN_EMAILS`.
-- Image upload: `store.uploadImage()` → `storage.from('complaint-images')` when configured, else data-URL preview.
-- Health check proving backend deploy: `/api/health`.
-
-## Deploy (live link for resume)
-
-Vercel + Supabase free tiers, no card needed:
-
-```bash
-# 1) push to GitHub (see SETUP_GUIDE.md for exact commands)
-# 2) vercel.com → Add New Project → Import campusfix repo
-# 3) Environment Variables → add the 3 NEXT_PUBLIC_* vars → Deploy
+app/
+  page.tsx          campus feed (search / filter / sort / upvote, live sync)
+  login/page.tsx    roster login + campus registration (no public signup)
+  new/page.tsx      report an issue + photo proof
+  issue/[id]/       detail, comments, BRAG status controls
+  my/page.tsx       your own reports
+  admin/page.tsx    warden/campus-admin dashboard + member management
+  team/page.tsx     app-team verification queue + decision-email log
+  pending/page.tsx  registration status for applicants
+  api/health        live DB probe (mode: live vs local)
+  api/notify        decision-email sender (Gmail SMTP → Resend → logged)
+lib/
+  store.ts          the ONLY data layer (campus-scoped queries + realtime)
+  auth.tsx          Name+Email roster sessions (localStorage)
+  types.ts          roles, campus workflow, team roster
+supabase/
+  schema.sql        full schema: tables, RLS, vote-count trigger, dedupe index (re-runnable)
 ```
-
-You get `https://campusfix-xxx.vercel.app`. Put that + GitHub link in resume.
 
 ## Resume bullets (copy-paste)
 
-- Built CampusFix, a hostel maintenance tracker (Next.js, Supabase Postgres/RLS/Storage) with role-based Open→Resolved workflow, upvoting, and image proof; deployed on Vercel — [live link]
-- Designed 4-table schema (profiles, complaints, comments, upvotes) with RLS policies and trigger-maintained vote counts; implemented filter/search/sort feed and warden dashboard
-
-## Interview demo script (60 sec)
-
-1. Feed: "8 real issues, sorted by votes — warden sees priority instantly."
-2. Report: create "Lift not working, Block C" with photo.
-3. Login as admin (incognito): dashboard → mark In Progress → add comment "Technician assigned" → Resolved.
-4. Point to Supabase Table Editor row + `/api/health` JSON as backend proof.
+- Built CampusFix, a multi-tenant maintenance tracker (Next.js, Supabase Postgres/RLS/Realtime) with team-verified campus onboarding, roster auth, and live issue workflow — **Live:** https://campusfix-8tiz.vercel.app/
+- Designed 6-table schema with RLS, trigger-maintained vote counts, and register-once dedupe; implemented CSV bulk onboarding, realtime feed, and Gmail-SMTP decision emails

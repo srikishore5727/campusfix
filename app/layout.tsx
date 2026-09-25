@@ -4,9 +4,15 @@ import { AuthProvider } from "@/lib/auth";
 import Navbar from "@/components/Navbar";
 
 export const metadata: Metadata = {
-  title: "CampusFix — Hostel Complaint Tracker",
+  title: "CampusFix — Multi-campus Complaint Tracker",
   description:
-    "Report hostel/PG maintenance issues, upvote what affects you, and track fixes transparently. Next.js + Supabase fullstack project.",
+    "One platform, many campuses. Students report issues, wardens resolve, campus admins manage. Next.js + Supabase with live updates.",
+};
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
@@ -16,14 +22,15 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="min-h-screen">
+      <head>
+        <link rel="preload" href="/campusfix-logo.png" as="image" fetchPriority="high" />
+      </head>
+      <body className="min-h-screen bg-[#fafafa] text-zinc-900 antialiased">
         <AuthProvider>
           <Navbar />
-          <main className="mx-auto w-full max-w-5xl px-4 py-6">{children}</main>
-          <footer className="mx-auto w-full max-w-5xl px-4 pb-10 pt-4 text-center text-xs text-zinc-500">
-            CampusFix • Fullstack demo: Next.js + Supabase (Postgres, Auth,
-            Storage) • Deployed on Vercel
-          </footer>
+          <main className="mx-auto w-full max-w-5xl px-3 py-4 sm:px-4 sm:py-6">
+            {children}
+          </main>
         </AuthProvider>
       </body>
     </html>

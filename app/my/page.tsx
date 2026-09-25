@@ -1,25 +1,41 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import ComplaintCard from "@/components/ComplaintCard";
 import { useAuth } from "@/lib/auth";
-import { fetchComplaints, toggleUpvote } from "@/lib/store";
+import { fetchComplaints, fetchUserUpvotedIds, mergeVotedState, subscribeCampusUpdates, toggleUpvote } from "@/lib/store";
 import type { Complaint } from "@/lib/types";
 
 export default function MyPage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [items, setItems] = useState<Complaint[]>([]);
   const [loading, setLoading] = useState(true);
+  const [voting, setVoting] = useState<Record<string, boolean>>({});
+
+  const load = useCallback(async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const all = await fetchComplaints(user.campus_id);
+      const voted = await fetchUserUpvotedIds(user.id, all.map((c) => c.id));
+      setItems(mergeVotedState(all, voted, user.id).filter((c) => c.user_id === user.id));
+    } catch (e: any) {
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.id, user?.campus_id]);
 
   useEffect(() => {
-    fetchComplaints().then((all) => {
-      setItems(user ? all.filter((c) => c.user_id === user.id) : []);
-      setLoading(false);
-    });
-  }, [user?.id]);
+    if (!authLoading) load();
+  }, [authLoading, load]);
 
-  if (!user)
+  useEffect(() => subscribeCampusUpdates(() => load()), [load]);
+
+  if (!authLoading && !user)
     return (
       <p className="rounded-2xl border bg-white p-6 text-sm">
         Please <Link href="/login" className="font-bold underline">login</Link> to see your issues.
@@ -28,13 +44,13 @@ export default function MyPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">My issues ({items.length})</h1>
+      <h1 className="text-xl font-bold sm:text-2xl">My issues ({items.length})</h1>
+      <p className="text-sm text-zinc-500">Reports you filed in {user?.campus_name} — visible to your whole campus.</p>
       {loading ? (
         <p className="text-sm text-zinc-500">Loading…</p>
       ) : items.length === 0 ? (
         <div className="rounded-2xl border bg-white p-8 text-center text-sm">
-          You have not reported anything yet.{" "}
-          <Link href="/new" className="font-bold underline">Report your first issue</Link>
+          Nothing yet. <Link href="/new" className="font-bold underline">Report your first issue</Link>
         </div>
       ) : (
         <div className="grid gap-3">
@@ -42,10 +58,16 @@ export default function MyPage() {
             <ComplaintCard
               key={c.id}
               c={c}
-              voted={c.upvoted_by.includes(user.id)}
+              voted={(c.upvoted_by || []).includes(user!.id)}
               onUpvote={async (x) => {
-                const u = await toggleUpvote(x, user.id);
-                setItems((p) => p.map((y) => (y.id === x.id ? u : y)));
+                if (voting[x.id]) return;
+                setVoting((p) => ({ ...p, [x.id]: true }));
+                try {
+                  const u = await toggleUpvote(x, user!.id);
+                  setItems((p) => p.map((y) => (y.id === x.id ? u : y)));
+                } finally {
+                  setVoting((p) => ({ ...p, [x.id]: false }));
+                }
               }}
             />
           ))}

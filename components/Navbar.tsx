@@ -55,7 +55,7 @@ export default function Navbar() {
   return (
     <header className="sticky top-0 z-20 border-b border-zinc-200 bg-white/95 backdrop-blur">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-2 px-3 py-2.5 sm:px-4">
-        <Link href={user ? "/" : "/login"} className="flex min-w-0 items-center gap-2">
+        <Link href={!user ? "/login" : user.role === "super_admin" ? "/team" : "/"} className="flex min-w-0 items-center gap-2">
           <Image
             src="/campusfix-logo.png"
             alt="CampusFix"

@@ -8,7 +8,7 @@
 
 **Campus registration (verified by the app team):**
 - New college registers → status **pending** (register-once: normalized name dedupe blocks `IIT Madras`/`iit-madras` duplicates while pending or approved)
-- Team opens `/team` (emails in `NEXT_PUBLIC_TEAM_EMAILS`) → Approve or Decline with reason → decision email goes automatically (`/api/notify` + Resend when `RESEND_API_KEY` set, else logged in Team → Decision emails)
+- Team opens `/team` (fixed roster: Sri Kishore S + Manikandan, name+email checked) → Approve or Decline with reason → decision email goes automatically (`/api/notify` via Gmail SMTP when `GMAIL_USER` + `GMAIL_APP_PASSWORD` set, else logged in Team → Decision emails)
 - Pending campuses see "verification in progress" gates; approved unlocks feed + member management; declined shows the reason
 
 **Login (private roster — no public signup, no campus list):**

@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import {
   fetchAllCampuses,
@@ -233,10 +232,6 @@ export default function TeamPage() {
           ))}
         </div>
       </section>
-
-      <p className="text-center text-xs text-zinc-500">
-        <Link href="/" className="font-bold underline">Back to app</Link>
-      </p>
     </div>
   );
 }

@@ -75,18 +75,24 @@ export function normalizeCampus(n: string) {
   return n.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+// CampusFix team roster — fixed. Same strict Name+Email check as students:
+// a team email alone is NOT enough, the name must match exactly (normalized).
+export const TEAM_ROSTER: { name: string; email: string }[] = [
+  { name: "Sri Kishore S", email: "srikishore9080676683@gmail.com" },
+  { name: "Manikandan", email: "manikandan863716@gmail.com" },
+];
+
 export function getTeamEmails(): string[] {
-  const raw =
-    process.env.NEXT_PUBLIC_TEAM_EMAILS ||
-    "team@campusfix.app";
-  return raw
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
+  return TEAM_ROSTER.map((t) => t.email);
 }
 
 export function isTeamEmail(email: string) {
-  return getTeamEmails().includes(email.trim().toLowerCase());
+  return TEAM_ROSTER.some((t) => t.email === email.trim().toLowerCase());
+}
+
+export function getTeamMemberName(email: string): string | null {
+  const hit = TEAM_ROSTER.find((t) => t.email === email.trim().toLowerCase());
+  return hit ? hit.name : null;
 }
 
 export function normalizeEmail(e: string) {

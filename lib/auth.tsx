@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from "react";
 import type { AppUser } from "./types";
-import { isTeamEmail, normalizeEmail, normalizeName } from "./types";
+import { getTeamMemberName, isTeamEmail, normalizeEmail, normalizeName } from "./types";
 import { createCampus, fetchCampusById, findMemberByEmail } from "./store";
 import { getSupabaseBrowser } from "./supabaseClient";
 
@@ -31,10 +31,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(SESSION_KEY);
       if (raw) {
         const u = JSON.parse(raw) as AppUser;
-        const teamOk = u.role === "super_admin" && isTeamEmail(u.email);
+        // team sessions must match the fixed roster (name + email), like everyone else
+        const rosterName = u.role === "super_admin" ? getTeamMemberName(u.email) : null;
+        const teamOk =
+          u.role === "super_admin" &&
+          rosterName !== null &&
+          normalizeName(u.name) === normalizeName(rosterName);
         const memberOk = u.role !== "super_admin" && u.campus_id && u.email && u.name && u.role;
-        if (teamOk || memberOk) setUser(u);
-        else localStorage.removeItem(SESSION_KEY);
+        if (teamOk || memberOk) {
+          // canonicalize team display name from roster
+          if (teamOk && rosterName) u.name = rosterName;
+          setUser(u);
+        } else localStorage.removeItem(SESSION_KEY);
       }
     } catch {}
     setLoading(false);
@@ -59,9 +67,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) return "Enter a valid email.";
 
     if (isTeamEmail(cleanEmail)) {
+      const rosterName = getTeamMemberName(cleanEmail)!;
+      if (normalizeName(cleanName) !== normalizeName(rosterName))
+        return `Name doesn't match our team records for this email. Registered as "${rosterName}" — enter it exactly.`;
       persist({
         id: `team_${cleanEmail}`,
-        name: cleanName,
+        name: rosterName,
         email: cleanEmail,
         role: "super_admin",
         campus_id: "",

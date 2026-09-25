@@ -28,9 +28,6 @@ export default function RootLayout({
           <main className="mx-auto w-full max-w-5xl px-3 py-4 sm:px-4 sm:py-6">
             {children}
           </main>
-          <footer className="mx-auto w-full max-w-5xl px-4 pb-10 pt-4 text-center text-xs text-zinc-500">
-            CampusFix • Multi-tenant: Next.js + Supabase (Postgres, Auth, Storage, Realtime) • Vercel
-          </footer>
         </AuthProvider>
       </body>
     </html>

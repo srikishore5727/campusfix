@@ -2,8 +2,8 @@
 
 > One platform, many colleges. Each campus gets an isolated space: students report issues with photo proof, upvote what affects them, and watch wardens move it Open → In Progress → Resolved. Campus registrations are verified by the app team before going live.
 
-**Live demo:** https://campusfix-8tiz.vercel.app/
-**Health check:** https://campusfix-8tiz.vercel.app/api/health
+**Live demo:** https://campusfix-v1.vercel.app/
+**Health check:** https://campusfix-v1.vercel.app/api/health
 
 **Stack:** Next.js 16 (App Router) · Supabase (Postgres + Storage + Realtime) · Tailwind CSS 4 · Vercel
 
@@ -27,7 +27,7 @@
 
 ## Try it live (2 min)
 
-1. Open https://campusfix-8tiz.vercel.app/ → **Register a new campus** (any test college name + your name/email) → lands on **verification in progress**
+1. Open https://campusfix-v1.vercel.app/ → **Register a new campus** (any test college name + your name/email) → lands on **verification in progress**
 2. Team login at `/team` restores your campus after approval — for a quick self-test, register, then check status on `/pending`
 3. As campus admin: **Dashboard → Members** → add a student → login as them → **Report** an issue with a photo → upvote it → watch counts update
 4. As warden/admin: open the issue → set **In Progress** (amber) → comment → **Resolved** (green)
@@ -67,5 +67,5 @@ supabase/
 
 ## Resume bullets (copy-paste)
 
-- Built CampusFix, a multi-tenant maintenance tracker (Next.js, Supabase Postgres/RLS/Realtime) with team-verified campus onboarding, roster auth, and live issue workflow — **Live:** https://campusfix-8tiz.vercel.app/
+- Built CampusFix, a multi-tenant maintenance tracker (Next.js, Supabase Postgres/RLS/Realtime) with team-verified campus onboarding, roster auth, and live issue workflow — **Live:** https://campusfix-v1.vercel.app/
 - Designed 6-table schema with RLS, trigger-maintained vote counts, and register-once dedupe; implemented CSV bulk onboarding, realtime feed, and Gmail-SMTP decision emails

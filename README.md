@@ -1,41 +1,36 @@
-# CampusFix — Multi-campus Complaint & Maintenance Tracker
+# CampusFix — Multi-Campus Complaint & Maintenance Tracker
 
-> One platform, many colleges. Each campus gets an isolated space: students see ONLY their campus issues, wardens resolve them, campus in-charge manages wardens. Live updates everywhere.
+> One platform, many colleges. Each campus gets an isolated space: students report issues with photo proof, upvote what affects them, and watch wardens move it Open → In Progress → Resolved. Campus registrations are verified by the app team before going live.
 
-**Stack:** Next.js App Router · Supabase (Postgres + Auth + Storage + Realtime) · Tailwind · Vercel
+**Live demo:** https://campusfix-8tiz.vercel.app/
+**Health check:** https://campusfix-8tiz.vercel.app/api/health
 
-**Live:** _(paste Vercel URL)_ `https://campusfix.vercel.app`
-
-**Campus registration (verified by the app team):**
-- New college registers → status **pending** (register-once: normalized name dedupe blocks `IIT Madras`/`iit-madras` duplicates while pending or approved)
-- Team opens `/team` (fixed roster: Sri Kishore S + Manikandan, name+email checked) → Approve or Decline with reason → decision email goes automatically (`/api/notify` via Gmail SMTP when `GMAIL_USER` + `GMAIL_APP_PASSWORD` set, else logged in Team → Decision emails)
-- Pending campuses see "verification in progress" gates; approved unlocks feed + member management; declined shows the reason
-
-**Login (private roster — no public signup, no campus list):**
-- Campus admin adds you (Name + Email, single or CSV bulk) → you login with exact Name + Email → auto-lands in your campus
-- New college? Register campus → you become its admin → add members from Admin → Members
-- Test accounts (seeded locally, never shown in UI): `Campus Admin / admin@greenfield.edu`, `Ravi Warden / warden@greenfield.edu`, `Aarav Patel / aarav@greenfield.edu`
+**Stack:** Next.js 16 (App Router) · Supabase (Postgres + Storage + Realtime) · Tailwind CSS 4 · Vercel
 
 ---
 
-## Why resume-worthy
+## Why this isn't a generic project
 
-- Multi-tenant: `campuses` table, every profile/complaint scoped by `campus_id`, cross-campus access blocked in UI + query filter
-- 3 roles: `student` (report/upvote), `warden` (status updates, needs invite), `campus_admin` (dashboard + add/remove wardens)
-- Realtime: Supabase `postgres_changes` channels for complaints/comments/upvotes + local-event + 7s polling + refetch on focus — feed/detail/dashboard refresh without manual reload
-- Responsive mobile-first UX: 44px+ touch targets, skeletons, optimistic upvotes, empty states, campus badge in nav
+- **Multi-tenant by design** — every row scoped by `campus_id`; cross-campus access blocked in UI and in every query
+- **Approval workflow** — new campuses register once (normalized-name dedupe), sit in `pending`, and only unlock after team verification; Approve/Decline triggers an automatic decision email
+- **Private roster auth** — no public signup, no campus list to scrape; campus admins add members (single or CSV bulk for 300+ students); login checks Name + Email exactly and auto-routes you to your campus
+- **Realtime + honest errors** — Supabase Realtime channels with polling fallback; when the DB is unreachable the UI says so instead of silently showing fake data (`/api/health` proves live status)
 
-## Features
+## Roles
 
-1. **Real auth** — email/password signup/login per role; campus picker on signup; warden invite-gated
-2. **Campuses** — create campus on signup; 2 seeded colleges locally; isolated feeds
-3. **Report** — title/category/block/description/photo (4MB limit, preview)
-4. **Feed** — campus-only, search/filter/sort, optimistic upvote, live sync badge
-5. **Issue detail** — campus-guarded, comments with role badges, warden/admin status buttons
-6. **My issues** — own reports, live-updating
-7. **Dashboard** — per-campus stats + priority list + (admin only) Manage wardens: add/remove emails
+| Role | Can do |
+|---|---|
+| Student | Report issues, upvote, comment, track own campus feed |
+| Warden | Everything above + change issue status (added by campus admin) |
+| Campus admin | Everything above + manage members (add / CSV bulk / remove, last-admin protected) |
+| CampusFix team (`/team`) | Verify campuses: Approve / Decline with reason; decision-email log |
 
-Works without Supabase (localStorage, per-browser) and switches to Supabase cloud when env vars exist. Re-run `supabase/schema.sql` in SQL Editor to upgrade old installs to multi-tenant.
+## Try it live (2 min)
+
+1. Open https://campusfix-8tiz.vercel.app/ → **Register a new campus** (any test college name + your name/email) → lands on **verification in progress**
+2. Team login at `/team` restores your campus after approval — for a quick self-test, register, then check status on `/pending`
+3. As campus admin: **Dashboard → Members** → add a student → login as them → **Report** an issue with a photo → upvote it → watch counts update
+4. As warden/admin: open the issue → set **In Progress** (amber) → comment → **Resolved** (green)
 
 ## Run locally
 
@@ -46,24 +41,31 @@ npm run dev
 # http://localhost:3000
 ```
 
-Test multi-tenancy in 2 min:
-1. Campus Setup → create `Test College` as admin A → Admin dashboard → add `warden@test.edu`
-2. Logout → Warden tab → sign up `warden@test.edu` + Test College → login OK
-3. Try warden signup with random email → blocked (not invited) ✓
-4. Student signup in Greenfield → sees only Greenfield feed; create issue → appears instantly in second tab (realtime) ✓
-5. Open that issue ID while logged into Lakeview → "Not in your campus" ✓
+Without Supabase env vars the app runs on seeded local demo data (2 colleges). With env vars it uses Supabase exclusively — see `SETUP_GUIDE.md`.
 
-## Supabase connect
+## Project map
 
-1. supabase.com → New project → copy URL + anon key
-2. SQL Editor → run `supabase/schema.sql` (v2, re-runnable) → Storage → bucket `complaint-images` Public ON → Auth → Email ON, Confirm email OFF for demo
-3. `.env.local` from `.env.example` (only 2 vars now)
-4. Restart dev. Cross-device realtime needs: SQL Editor → run the two `alter publication supabase_realtime add table ...` lines at bottom of schema.sql (uncomment first).
+```
+app/
+  page.tsx          campus feed (search / filter / sort / upvote, live sync)
+  login/page.tsx    roster login + campus registration (no public signup)
+  new/page.tsx      report an issue + photo proof
+  issue/[id]/       detail, comments, BRAG status controls
+  my/page.tsx       your own reports
+  admin/page.tsx    warden/campus-admin dashboard + member management
+  team/page.tsx     app-team verification queue + decision-email log
+  pending/page.tsx  registration status for applicants
+  api/health        live DB probe (mode: live vs local)
+  api/notify        decision-email sender (Gmail SMTP → Resend → logged)
+lib/
+  store.ts          the ONLY data layer (campus-scoped queries + realtime)
+  auth.tsx          Name+Email roster sessions (localStorage)
+  types.ts          roles, campus workflow, team roster
+supabase/
+  schema.sql        full schema: tables, RLS, vote-count trigger, dedupe index (re-runnable)
+```
 
-Wiring: `lib/store.ts` = only data layer (campus filter on every query) + `subscribeCampusUpdates()`; `lib/auth.tsx` = session + role/campus; `app/admin` = warden invites; image upload → Storage bucket.
+## Resume bullets (copy-paste)
 
-## Deploy
-
-Vercel → Import repo → add `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` → Deploy. Check `/api/health` → `supabaseConfigured:true`.
-
-Resume: `CampusFix — multi-tenant hostel tracker (Next.js, Supabase Postgres/RLS/Realtime) with campus isolation, invite-gated wardens, live feed — [live] [github]`
+- Built CampusFix, a multi-tenant maintenance tracker (Next.js, Supabase Postgres/RLS/Realtime) with team-verified campus onboarding, roster auth, and live issue workflow — **Live:** https://campusfix-8tiz.vercel.app/
+- Designed 6-table schema with RLS, trigger-maintained vote counts, and register-once dedupe; implemented CSV bulk onboarding, realtime feed, and Gmail-SMTP decision emails

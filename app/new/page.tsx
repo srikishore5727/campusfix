@@ -123,7 +123,7 @@ export default function NewPage() {
               htmlFor="cf-photo"
               className="inline-flex min-h-[46px] cursor-pointer items-center justify-center gap-2 rounded-xl bg-zinc-900 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-zinc-700 active:scale-[0.99]"
             >
-              <span aria-hidden>📷</span> Choose photo
+              Choose photo
             </label>
             <span className="truncate text-xs text-zinc-500">
               {file ? file.name : "No photo selected — JPG/PNG under 4MB"}
